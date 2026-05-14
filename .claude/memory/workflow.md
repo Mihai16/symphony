@@ -58,8 +58,13 @@ See `.claude/skills/start-issue-branch/` for the full procedure.
 
 ## Pull Requests
 
+- **Always close the issue from the PR when possible.** This is a strong user preference. The PR
+  body MUST open with `Closes #<issue-number>` (or `Fixes #N` / `Resolves #N` — all accepted by
+  GitHub) so merging the PR auto-closes the issue without a separate manual step. If a single PR
+  resolves multiple issues, list each: `Closes #N, Closes #M`. The only time this is skipped is
+  when no issue exists (e.g. the trivial-change carve-out above, or a hotfix being filed as its
+  own issue). In every other case: tie the PR to its issue with a closing keyword.
 - PR title: same as the issue title, or a closely related rewording. Keep under 70 chars.
-- PR body opens with `Closes #<issue-number>` so merging the PR auto-closes the issue.
 - PR body has two sections at minimum: **Summary** (1–3 bullets, the why) and **Test plan**
   (markdown checklist).
 - One PR per issue. If a single issue's scope grows during work, file follow-up issues for the
