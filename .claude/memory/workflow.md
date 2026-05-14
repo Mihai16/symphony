@@ -124,6 +124,27 @@ See `.claude/skills/audit-wiki/` for the audit procedure.
 - Body explains the *why* when it isn't obvious from the diff.
 - Co-authored / generated-by trailers are added by the harness; do not author them manually.
 
+## Architecture Work
+
+When asked to produce architecture documents (e.g. `ARCHITECTURE.md`), design notes, or any
+artifact that requires *making decisions* on top of an existing proposal or plan, you OWN the
+decisions. Read the relevant inputs (proposal, plan, code) and commit to specific choices with
+rationale — do not return a menu of options without picking one.
+
+If the task is too hard to do alone (large unfamiliar codebase, deep cross-module trade-offs,
+multiple architectural styles in tension, or a decision that hinges on code you haven't
+internalised), **summon a specialised subagent** rather than guessing. Useful subagent types for
+architecture work:
+
+- `Explore` for "where is X / who reads Y / which files implement Z" lookups that would otherwise
+  fill the main context with raw greps.
+- `Plan` for an independent second pass over the implementation strategy when the choice between
+  two architectures is genuinely close and you want a sanity check.
+- `general-purpose` for multi-step research that combines code reading, doc reading, and synthesis.
+
+Don't delegate the *decision*. Delegate the *evidence-gathering* that lets you decide. The final
+ADR-style commitments in the document are yours.
+
 ## When These Conventions Conflict With User Instructions
 
 User instructions win. If a user says "don't bother with an issue, just push the fix", follow
