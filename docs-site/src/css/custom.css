@@ -1,0 +1,22 @@
+/* Minimal overrides on top of Docusaurus defaults. */
+
+:root {
+  --ifm-color-primary: #4a3aff;
+  --ifm-color-primary-dark: #3324ff;
+  --ifm-color-primary-darker: #2417ff;
+  --ifm-color-primary-darkest: #1308d6;
+  --ifm-color-primary-light: #6151ff;
+  --ifm-color-primary-lighter: #6e5fff;
+  --ifm-color-primary-lightest: #9387ff;
+  --ifm-code-font-size: 92%;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #9387ff;
+  --ifm-color-primary-dark: #7666ff;
+  --ifm-color-primary-darker: #6757ff;
+  --ifm-color-primary-darkest: #3a25ff;
+  --ifm-color-primary-light: #b0a8ff;
+  --ifm-color-primary-lighter: #beb7ff;
+  --ifm-color-primary-lightest: #e5e1ff;
+}
