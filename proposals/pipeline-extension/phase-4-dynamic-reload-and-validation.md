@@ -1,0 +1,302 @@
+# Phase 4 — Dynamic Reload, Validation Hardening, and SPEC Edits
+
+> Tracking issue: [#22](https://github.com/Mihai16/symphony/issues/22)
+> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 4) and §3.8, §3.9, §4.
+> Depends on [Phase 3](./phase-3-claude-pipeline-runner.md) ([#21](https://github.com/Mihai16/symphony/issues/21)) and transitively on Phases 1–2 ([#19](https://github.com/Mihai16/symphony/issues/19), [#20](https://github.com/Mihai16/symphony/issues/20)).
+
+## Summary
+
+Phase 4 closes out the pipeline extension by wiring the multi-pipeline schema
+into the existing `WORKFLOW.md` reload loop, hardening dispatch preflight
+validation around the new fields, expanding the test matrix to cover the
+proposal's six new parsing/dispatch cases, and landing the corresponding
+`SPEC.md` edits. There are no new modules. The phase is small but load-bearing:
+it is what turns "supports two runners" into "operators can flip between
+runners on a live deployment without restart, with errors that are obvious."
+
+The critical insight is that the dynamic-reload "magic" is already implicit
+once `Pipelines.Spec.resolve/1` exists (Phase 1) and `AgentRunner` dispatches
+on the resolved spec (Phase 2). `WorkflowStore` already polls `WORKFLOW.md`
+every second; Phase 4 adds exactly one observable signal — an info-level log
+line on the per-tick refresh whenever the resolved pipeline name or kind
+changes between ticks — plus the validation error clauses and the SPEC text
+that documents the new behaviour.
+
+## Goals
+
+- Make `pipeline.use` / `pipelines.<name>` changes take effect on the next
+  dispatch tick without a service restart, with operator-visible logs when the
+  active pipeline changes.
+- Reject invalid pipeline configurations at preflight with typed errors and
+  fall back to the last known good behaviour.
+- Cover the proposal's six new parse/dispatch matrix entries with focused
+  tests in `workspace_and_config_test.exs`.
+- Land the SPEC.md edits enumerated in plan §4 in the same PR as the
+  behaviour they describe.
+
+## Non-Goals
+
+- Modifying `WorkflowStore` itself — its 1 s mtime/size/hash poll already
+  satisfies the spec's reload requirement, and Phase 4 does not change
+  detection, only consumption.
+- Restarting in-flight workers when the active pipeline changes. The proposal
+  explicitly preserves the "in-flight workers finish under their original
+  pipeline" rule, and it is satisfied automatically because `AgentRunner`
+  resolves the spec once at run start.
+- Adding new pipeline kinds or new schema fields. Phase 4 is purely about
+  reload semantics, validation hardening, tests, and spec documentation.
+- Adding a separate change-event subscription channel. The single info-level
+  log line is sufficient operator surface for v1.
+
+## Files Touched
+
+Code (all already touched in earlier phases — Phase 4 makes minimal additions):
+
+- `elixir/lib/symphony_elixir/orchestrator.ex` — extend
+  `refresh_runtime_config/1` to log when the resolved pipeline name or kind
+  changes between ticks. No other behaviour change.
+- `elixir/lib/symphony_elixir/config.ex` — extend `validate_semantics/1` and
+  `format_config_error/1` with the five new validation clauses (any not yet
+  landed by Phase 1's resolver wiring).
+
+Tests:
+
+- `elixir/test/symphony_elixir/workspace_and_config_test.exs` — append the six
+  matrix cases from proposal §"Test and Validation Matrix Additions".
+
+Spec:
+
+- `SPEC.md` — the seven coupled edits enumerated below.
+
+Explicitly NOT touched:
+
+- `elixir/lib/symphony_elixir/workflow_store.ex` — already polls; no change.
+- `elixir/lib/symphony_elixir/pipelines/spec.ex` — already exists from
+  Phase 1; the resolver is the choke point that makes reload Just Work.
+- The two runners (`Pipelines.Codex`, `Pipelines.ClaudePipeline`) — they
+  receive a spec snapshot at run start and never re-resolve.
+
+## Detailed Change Set
+
+### Dynamic Reload Plumbing (`workflow_store.ex`, `orchestrator.ex`)
+
+> Note: `WorkflowStore` itself does not change — it already polls. What
+> changes is what consumers do at the next tick.
+
+The reload story for pipelines is a side-effect of `Spec.resolve/1` reading
+`Config.settings!()` at run time:
+
+1. `WorkflowStore` polls `WORKFLOW.md` every 1 s and accepts a new parse
+   when the (mtime, size, content hash) stamp changes (`workflow_store.ex`
+   lines 117-129, 141-148). Invalid parses are rejected and the last known
+   good workflow is retained. This is the existing contract; Phase 4 inherits
+   it unchanged.
+2. `Config.settings!()` reads the current workflow via `Workflow.current/0`,
+   so the moment `WorkflowStore` accepts a new parse, every subsequent
+   `settings!()` call sees the new shape.
+3. `Pipelines.Spec.resolve(Config.settings!())` is the single choke point
+   that converts settings into a runtime spec. Every new dispatch goes
+   through it; in-flight runs do not, because `AgentRunner.run/3` resolves
+   the spec exactly once at run start and passes that snapshot down.
+
+That is sufficient for behaviour. The single observable add is in
+`Orchestrator.refresh_runtime_config/1` (currently `orchestrator.ex` line
+1296): cache the last resolved `(name, kind)` pair on the orchestrator
+state, and on each tick compare against the freshly resolved pair. When
+either differs, emit one info-level log line:
+
+```
+Pipeline selection changed: name=<old> kind=<old> -> name=<new> kind=<new>
+```
+
+This is the only new log line. It MUST be info-level (operators see it
+without enabling debug logs) and MUST fire exactly once per change (not on
+every tick where the spec is steady-state, and not when validation fails —
+in that case the existing preflight error path handles operator visibility).
+If `Spec.resolve/1` returns `{:error, _}` on the new tick, do not log a
+"changed" event; the existing `maybe_dispatch/1` error log surfaces the
+problem.
+
+The orchestrator state record gains a single new key, e.g.
+`:last_resolved_pipeline`, populated as `{name, kind}` or `nil` on first
+tick. No other state is needed because `Spec.resolve/1` is cheap and the
+in-flight workers carry their own snapshotted spec.
+
+The "in-flight workers are not interrupted" rule from the proposal is
+satisfied without further code: workers receive a spec at `AgentRunner.run/3`
+entry and never re-resolve. `Orchestrator.reconcile_stalled_running_issues/1`
+already reads `stall_timeout_ms` from a per-running-entry snapshot (added in
+Phase 2 — see plan §3.6), so a mid-flight reload that changes
+`stall_timeout_ms` does not retroactively kill the running worker.
+
+### Validation Hardening (`config.ex`)
+
+`Config.validate!/0` (`config.ex` line 94) is the per-tick preflight gate
+called from `Orchestrator.maybe_dispatch/1` (`orchestrator.ex` lines
+224-264). Phase 1 already wires `Pipelines.Spec.resolve/1` into
+`validate_semantics/1`. Phase 4 ensures the five validation rules from
+proposal §"Validation" are all enforced and surfaced with operator-readable
+messages:
+
+1. If `pipelines` is present, `pipeline.use` MUST be present.
+2. `pipeline.use` MUST name a key in `pipelines`.
+3. The selected pipeline's `kind` MUST be supported (currently `codex`,
+   `claude-pipeline`).
+4. The selected pipeline's `command` MUST be non-empty.
+5. Kind-specific required fields MUST be present (e.g. `stages` non-empty
+   for `claude-pipeline`).
+
+Each surfaces as a typed error tuple:
+
+- `{:pipeline_unresolved, :missing}`
+- `{:pipeline_unresolved, {:unknown_name, name}}`
+- `{:unsupported_pipeline_kind, kind}`
+- `{:missing_pipeline_field, name, field}`
+
+`format_config_error/1` (`config.ex` lines 136-153) gains one clause per
+tuple, producing strings like
+`Pipeline "claude-ir" missing required field "command"`. The error string is
+what shows up via `Logger.error/1` in `Orchestrator.maybe_dispatch/1`'s
+fallback clauses; add or extend the corresponding clauses there to match.
+
+Validation failure leaves the orchestrator's last known good pipeline
+selection intact: the `last_resolved_pipeline` cache is only updated on
+successful resolution, so a transient bad edit does not "lose" the previous
+selection from the operator's perspective.
+
+### Test Matrix Additions (`workspace_and_config_test.exs`)
+
+Append the six cases from proposal §"Test and Validation Matrix Additions"
+to `elixir/test/symphony_elixir/workspace_and_config_test.exs`. Each case
+is a focused parse-then-validate test using the in-memory workflow helpers
+already present in the file. The six cases:
+
+1. Workflow with only the legacy `codex` block loads and dispatches under
+   the implicit `__default_codex` pipeline (resolver returns the synthetic
+   spec; preflight passes).
+2. Workflow with `pipeline.use` and a matching `pipelines` entry loads and
+   dispatches under the selected pipeline (resolver returns that entry's
+   spec).
+3. Workflow with `pipeline.use` referencing a missing pipeline name fails
+   preflight with `{:pipeline_unresolved, {:unknown_name, _}}`.
+4. Workflow with a pipeline of unsupported `kind` fails preflight with
+   `{:unsupported_pipeline_kind, _}`.
+5. Dynamic reload that changes `pipeline.use` from one valid pipeline to
+   another applies to future dispatches without restarting in-flight
+   workers. Drive this by mutating the in-memory workflow between two
+   `Spec.resolve(Config.settings!())` calls and asserting the second call
+   returns the new spec, while a previously snapshotted spec from the first
+   call is unchanged.
+6. Dynamic reload that changes `pipeline.use` to an invalid value keeps the
+   last known good pipeline active and emits an operator-visible error.
+   Assert via `ExUnit.CaptureLog` that the preflight error string appears
+   and that the in-flight worker's snapshotted spec is untouched.
+
+Cases 5 and 6 are the load-bearing additions for Phase 4 — they assert the
+reload behaviour end-to-end through the public interfaces.
+
+Existing tests in `app_server_test.exs`, `core_test.exs`, and
+`live_e2e_test.exs` should keep passing without modification (per plan §3.9).
+
+### SPEC.md Edits
+
+These edits land in the same PR as the behaviour. Do not write them ahead
+of code — the plan §4 is explicit that they will drift if you do.
+
+- §5.3 Front Matter Schema (line ~326): append `pipeline` / `pipelines`
+  definitions; mark legacy `codex` block DEPRECATED
+- §6.2 Dynamic Reload Semantics (line ~522): append four-bullet list
+- §6.3 Dispatch Preflight Validation (line ~542): append five-bullet
+  validation list
+- §10 Agent Runner Protocol (line ~906): insert §10.0 "Pipeline Dispatch"
+- §13.7 OPTIONAL HTTP Server Extension: note additive `pipeline` /
+  `pipeline_kind` fields
+- §17.1 / §17.5: append six matrix entries
+- §18.1 leaves unchanged; §18.2 RECOMMENDED Extensions (line ~2089) gains
+  the proposal's Implementation Checklist Additions
+
+The edits are mechanical but coupled — each describes behaviour that is
+observable only once the code in this PR (and prior phases) is in place.
+Land them together in the Phase 4 PR.
+
+## Acceptance Criteria
+
+From plan §2 Phase 4 "Acceptance":
+
+- Editing `WORKFLOW.md` to flip `pipeline.use` takes effect on the next
+  dispatch tick without restart.
+- An invalid edit logs an operator-visible error and leaves the last-good
+  pipeline selected.
+
+Plus, by construction:
+
+- A single info-level log line surfaces each change to the resolved
+  `(name, kind)` pair.
+- The six new matrix tests pass.
+- All seven SPEC.md edits land in the same PR.
+- All pre-existing tests continue to pass without modification.
+
+## Test Plan
+
+- `mix test test/symphony_elixir/workspace_and_config_test.exs` covers the
+  six new matrix cases.
+- Full `mix test` confirms no regression in existing suites
+  (`app_server_test.exs`, `core_test.exs`, `live_e2e_test.exs`,
+  `pipelines/*_test.exs` from Phases 2 and 3).
+- A manual smoke test: start the dev orchestrator with a workflow declaring
+  two pipelines and `pipeline.use: codex-default`; edit the file to
+  `pipeline.use: claude-ir`; observe the info log line on the next tick
+  and confirm a freshly dispatched issue picks up the new pipeline while
+  any already-running worker stays on its original spec.
+- A manual negative smoke test: same setup, but edit `pipeline.use` to a
+  name not present in `pipelines`; confirm the preflight error string
+  appears in the orchestrator log and the previously selected pipeline
+  remains active.
+
+## Dependencies
+
+- Phase 3 (`./phase-3-claude-pipeline-runner.md`) — the `claude-pipeline`
+  runner must exist for the matrix's "swap from codex to claude-pipeline"
+  cases to be meaningful end-to-end.
+- Transitively, Phases 1 and 2 — the schema, resolver, and dispatch
+  refactor are all preconditions.
+
+Phase 4 has no downstream dependencies in this plan.
+
+## Risks
+
+### Hot reload across mismatched specs
+
+Operators can edit `WORKFLOW.md` at any moment. The most common failure mode
+is `pipeline.use` pointing at a pipeline whose `command` is missing or whose
+`kind` is unsupported. The orchestrator handles this via the existing
+preflight path (`maybe_dispatch/1` lines 224-264): it skips dispatch for the
+tick, leaves reconciliation active, and emits an `Logger.error/1` line. No
+extra retry logic is needed — the orchestrator will re-validate on the next
+tick automatically. The mitigation is purely about error message quality:
+the new `format_config_error/1` clauses must produce strings that name the
+offending pipeline and field so the operator can fix the workflow file
+without grepping source.
+
+A subtler case: an operator changes `pipeline.use` mid-run, with several
+in-flight workers still executing under the old pipeline. The contract is
+that those workers finish under the old spec. The risk is that
+`reconcile_stalled_running_issues/1` re-resolves and starts using the new
+spec's `stall_timeout_ms` against the in-flight worker. Phase 2 already
+addressed this by snapshotting `stall_timeout_ms` per running entry; Phase 4
+inherits that and adds a regression test (matrix case 5) that exercises the
+end-to-end behaviour.
+
+### `embeds_many` ordering vs. YAML map source
+
+Ecto's `embeds_many` is list-ordered, but the YAML source for `pipelines` is
+a map (insertion order is not guaranteed across reloads if the YAML library
+re-keys, and certainly not across editors that re-sort keys). Phase 1's
+schema normalizer sorts pipeline definitions by name before constructing
+the embed list, which makes the ordering deterministic across reloads.
+Phase 4 inherits this and depends on it: the matrix test for
+"changed `pipeline.use` from one valid pipeline to another" assumes
+resolver lookups are by name, not by position, and that a re-parse of the
+same YAML produces the same effective spec. If Phase 1's normalizer ever
+loses its sort step, matrix case 5 will become flaky in a way that depends
+on YAML library internals — keep the sort.

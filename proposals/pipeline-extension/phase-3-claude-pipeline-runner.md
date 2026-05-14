@@ -1,0 +1,330 @@
+# Phase 3 — `claude-pipeline` Runner
+
+> Tracking issue: [#21](https://github.com/Mihai16/symphony/issues/21)
+> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 3) and §3.4 (ClaudePipeline bullets), §5, §6.
+> Depends on [Phase 2](./phase-2-runner-strategy-extraction.md) ([#20](https://github.com/Mihai16/symphony/issues/20)).
+
+## Summary
+
+Phase 3 introduces `SymphonyElixir.Pipelines.ClaudePipeline`, the second concrete
+implementation of the `Pipelines.Runner` behaviour added in Phase 2. It enables
+`pipelines.<name>.kind: claude-pipeline` workflow definitions to dispatch through
+the new runner instead of the legacy Codex path.
+
+The crucial design point: **this runner is a configuration adapter, not a new
+protocol**. The launched subprocess MUST speak the Codex app-server JSON-RPC
+protocol on stdio. The proposal mandates this in the
+[Agent Runner Contract Changes](../pipeline-extension.md) section
+("the launched subprocess MUST speak the Codex app-server protocol on stdio,
+so the existing Agent Runner machinery (event forwarding, session ID extraction,
+stall detection, timeouts) works without modification"). All `ClaudePipeline`
+does is launch that subprocess with a different `command`, apply per-pipeline
+timeout overrides, cap the outer turn loop by `max_internal_iterations`, and tag
+log lines with `pipeline.kind` and `spec.name`. It reuses
+`SymphonyElixir.Codex.AppServer.start_session/2` and
+`SymphonyElixir.Codex.AppServer.run_turn/4` verbatim
+(`elixir/lib/symphony_elixir/codex/app_server.ex:39`, `:69`).
+
+## Goals
+
+- Add a runner that launches an arbitrary subprocess (per `pipelines.<name>.command`)
+  which speaks the Codex app-server protocol on stdio.
+- Reuse `Codex.AppServer` for session startup, turn streaming, event forwarding,
+  approval handling, and stall detection. No protocol code is duplicated.
+- Cap the outer turn loop with `min(spec.max_internal_iterations, agent.max_turns)`,
+  so multi-stage pipelines have an independent iteration budget while still
+  honouring Symphony's global hard ceiling.
+- Apply `spec.turn_timeout_ms`, `spec.read_timeout_ms`, and `spec.stall_timeout_ms`
+  as per-session overrides instead of reading globals from
+  `Config.settings!().codex`.
+- Surface stage-boundary `notification` events upstream unchanged, and populate
+  the OPTIONAL `iteration` snapshot field from `iteration_started` /
+  `iteration_completed` events the subprocess emits.
+
+## Non-Goals
+
+- Defining a new wire protocol. The proposal explicitly rejects a universal
+  pipeline protocol (proposal §"Non-Goals", and plan §7 "Out of Scope").
+- Implementing per-stage prompt overrides. Deferred per plan §5.
+- Multi-process pipelines (one Symphony worker → N OS subprocesses). Plan §7
+  explicitly defers this; `claude-pipeline` is one subprocess that internally
+  orchestrates stages.
+- Modifying `Codex.AppServer` beyond the keyword-overrides hook introduced in
+  Phase 2. Phase 3 is purely additive: a new module under `pipelines/`.
+- Changing snapshot/presenter wiring beyond the additive OPTIONAL `iteration`
+  field. The `pipeline` and `pipeline_kind` fields are added in Phase 2.
+
+## Protocol Contract
+
+> The launched subprocess MUST speak the Codex app-server JSON-RPC protocol on stdio.
+> This phase ships a *configuration adapter*, not a new protocol.
+
+This means a `claude-pipeline` subprocess:
+
+- Reads JSON-RPC 2.0 messages line-delimited on stdin.
+- Writes JSON-RPC 2.0 messages line-delimited on stdout.
+- Responds to `initialize`, `thread/start`, `turn/start` exactly as the Codex
+  app-server does (see `app_server.ex:241-302`).
+- Emits `notification`-style messages for stage progress and `turn/completed`
+  when the outer stage sequence finishes (proposal §"Observability").
+- Forwards token usage on relevant payloads so `codex_totals` keeps working
+  (existing `maybe_set_usage/2` extracts this — `app_server.ex:1018`).
+
+If a subprocess does not speak this protocol, Symphony WILL fail at session
+startup the same way it would for a broken Codex binary. There is no special
+casing.
+
+The pipeline's *internal* stage orchestration — sub-agent spawning, prompt
+templating, scoring against `review_threshold` — is invisible to Symphony.
+Symphony sees one outer turn that takes longer than a normal Codex turn.
+
+## Files Touched
+
+- `elixir/lib/symphony_elixir/pipelines/claude_pipeline.ex` (NEW — implements
+  `Pipelines.Runner`).
+- `elixir/test/symphony_elixir/pipelines/claude_pipeline_test.exs` (NEW).
+- `elixir/test/support/claude_pipeline_stub.exs` (NEW — stub subprocess; see
+  §"Test Plan").
+
+No other files change in this phase. The dispatcher in `AgentRunner.run/3`
+(extracted in Phase 2) already routes `kind: "claude-pipeline"` once the runner
+module exists; the registry in `pipeline_runner/1`
+(plan §3.5) is the only place that needs the module reference, and that lookup
+lives in the Phase 2 changeset.
+
+## Detailed Change Set
+
+### `Pipelines.ClaudePipeline` (new module)
+
+Lives at `elixir/lib/symphony_elixir/pipelines/claude_pipeline.ex`. Implements
+`@behaviour SymphonyElixir.Pipelines.Runner` from Phase 2. Public surface is the
+single `run/4` callback.
+
+```elixir
+defmodule SymphonyElixir.Pipelines.ClaudePipeline do
+  @behaviour SymphonyElixir.Pipelines.Runner
+  alias SymphonyElixir.Codex.AppServer
+  alias SymphonyElixir.Pipelines.Spec
+
+  @impl true
+  def run(%Spec{} = spec, workspace, issue, opts) do
+    Logger.metadata(pipeline_kind: spec.kind, pipeline_name: spec.name)
+
+    overrides = session_overrides(spec)
+    iteration_cap = iteration_cap(spec, opts)
+
+    with {:ok, session} <-
+           AppServer.start_session(workspace,
+             worker_host: Keyword.get(opts, :worker_host),
+             overrides: overrides
+           ) do
+      try do
+        do_iterations(session, spec, workspace, issue, opts, 1, iteration_cap)
+      after
+        AppServer.stop_session(session)
+      end
+    end
+  end
+end
+```
+
+`session_overrides/1` returns a keyword list with `:command`, `:turn_timeout_ms`,
+`:read_timeout_ms`, `:stall_timeout_ms` taken from the spec, dropping nils so
+unset fields fall through to Codex defaults. The `:overrides` keyword is the
+hook introduced in Phase 2 (plan §3.4 "Codex runner" bullet — the same hook is
+used by `Pipelines.Codex` for parity).
+
+### Iteration cap: `min(spec.max_internal_iterations, agent.max_turns)`
+
+```elixir
+defp iteration_cap(%Spec{max_internal_iterations: nil}, opts) do
+  Keyword.fetch!(opts, :max_turns)
+end
+
+defp iteration_cap(%Spec{max_internal_iterations: pipeline_cap}, opts) do
+  global_cap = Keyword.fetch!(opts, :max_turns)
+  min(pipeline_cap, global_cap)
+end
+```
+
+This implements plan §3.4 ("caps the outer turn loop by
+`min(spec.max_internal_iterations, agent.max_turns)` rather than only
+`agent.max_turns`"). The outer loop reuses the same `continue_with_issue?/2`
+gate the Codex runner uses (lifted from `agent_runner.ex:147-164` in Phase 2),
+so the iteration budget is consumed only when the issue remains active after a
+turn completes.
+
+### Timeout overrides
+
+`Codex.AppServer` today reads `Config.settings!().codex.turn_timeout_ms` etc.
+directly (see `app_server.ex:333`, `:923`). Phase 2 introduces a single
+`:overrides` keyword on `start_session/2` and threads it into `session_policies`
+and the receive loops. Phase 3 populates that keyword from the spec:
+
+| Spec field          | Override key       | Default if nil                   |
+|---------------------|--------------------|----------------------------------|
+| `turn_timeout_ms`   | `:turn_timeout_ms` | `Config.settings!().codex.turn_timeout_ms`  |
+| `read_timeout_ms`   | `:read_timeout_ms` | `Config.settings!().codex.read_timeout_ms`  |
+| `stall_timeout_ms`  | `:stall_timeout_ms`| `Config.settings!().codex.stall_timeout_ms` |
+| `command`           | `:command`         | `Config.settings!().codex.command`          |
+
+Defaults from proposal §"`pipelines.<name>` when `kind: claude-pipeline`":
+`turn_timeout_ms = 3_600_000`, `stall_timeout_ms = 600_000`. These are applied
+by `Pipelines.Spec.resolve/1` (Phase 1), so the runner just reads what the spec
+hands it.
+
+### Logger metadata (pipeline.kind, spec.name)
+
+Every log line emitted from inside the runner gets `pipeline_kind` and
+`pipeline_name` metadata (plan §3.4: "logs `pipeline.kind` and `spec.name` in
+every line via `Logger.metadata/1` so existing log grepping continues to work").
+Set once at the top of `run/4`; Elixir's `Logger.metadata/1` is process-local so
+this scopes to the worker Task.
+
+### Stage-boundary notifications + `iteration` snapshot field
+
+The runner does not interpret stage notifications; it forwards them verbatim
+through the `:on_message` callback already used by `AppServer.run_turn/4`
+(`app_server.ex:84`). Two specific notification methods are *opportunistically*
+recognised for the OPTIONAL `iteration` snapshot field (plan §5):
+
+- `iteration_started` — increments the runner's iteration counter.
+- `iteration_completed` — leaves the counter at the just-completed value.
+
+The counter is forwarded to the Orchestrator via the same
+`{:codex_worker_update, issue_id, message}` envelope (see Phase 2's snapshot
+plumbing). Pipelines that don't emit these notifications get no `iteration`
+field — exactly per plan §5 ("OPTIONAL field on the running entry, populated
+from the most recent observed event. Absent for pipelines that don't emit those
+events").
+
+## Open Question Resolutions Adopted
+
+- Reserved stage names: `implement`, `refine`, `review`, `document`, `test` (loose; arbitrary additional names pass through)
+- Per-stage prompt overrides: deferred
+- `max_internal_iterations` stays top-level (no `loop` block)
+- `iteration` becomes an OPTIONAL snapshot field
+
+These mirror the recommendations in plan §5 verbatim. They are reversible
+later: a future revision can introduce a `loop:` block, per-stage overrides, or
+require specific stage names without breaking workflows that target v1.
+
+## Acceptance Criteria
+
+From plan §2 Phase 3 acceptance line:
+
+- [ ] A synthetic test pipeline that runs a `bash -c '<jsonrpc echo>'`-style
+      stub can complete a turn end-to-end.
+- [ ] `notification` events emitted by the stub are forwarded to the
+      `:on_message` callback unchanged (verifiable by capturing into the test
+      mailbox).
+- [ ] `min(spec.max_internal_iterations, agent.max_turns)` correctly bounds the
+      outer loop in both directions (pipeline cap < agent cap, agent cap <
+      pipeline cap).
+- [ ] `spec.command` is honoured: a stub binary launched only when `command` is
+      set drives the run, not the global Codex command.
+- [ ] `spec.turn_timeout_ms` / `:read_timeout_ms` / `:stall_timeout_ms`
+      overrides take effect (the global Config values do not).
+- [ ] `Logger.metadata` includes `pipeline_kind: "claude-pipeline"` and
+      `pipeline_name: <spec.name>` on every line emitted from inside the
+      runner.
+- [ ] When the stub emits `iteration_started` / `iteration_completed`, the
+      counter reaches the snapshot via the existing
+      `{:codex_worker_update, _, _}` channel.
+
+## Test Plan
+
+### Stub subprocess under `test/support/`
+
+Create `elixir/test/support/claude_pipeline_stub.exs`. It is a tiny Elixir
+script (executable via `elixir test/support/claude_pipeline_stub.exs`) that
+speaks just enough Codex JSON-RPC to drive a turn to completion. Per plan §3.9:
+
+> "a stub subprocess (a small Elixir script under `test/support/`) that speaks
+> just enough of the Codex JSON-RPC protocol to drive a turn to completion.
+> Used to verify `command` override, `max_internal_iterations` capping, and
+> stage-boundary `notification` forwarding."
+
+Required behaviour:
+
+1. Read line-delimited JSON-RPC from stdin.
+2. On `initialize` (`id=1`) → reply `{"id":1,"result":{}}` then read `initialized`.
+3. On `thread/start` (`id=2`) → reply `{"id":2,"result":{"thread":{"id":"stub-thread"}}}`.
+4. On `turn/start` (`id=3`) → reply `{"id":3,"result":{"turn":{"id":"stub-turn"}}}`,
+   then write a few `notification`-shaped messages (including
+   `{"method":"iteration_started","params":{"iteration":1}}` and
+   `{"method":"iteration_completed","params":{"iteration":1}}`),
+   then write `{"method":"turn/completed","params":{}}`.
+5. Exit cleanly on EOF.
+
+The stub deliberately has no networking, no Claude API calls, no sub-agent
+fan-out — it only proves the protocol contract. Test assertions cover:
+
+- `claude_pipeline_test.exs`: `run/4` returns `:ok` with the stub.
+- Captures `:on_message` events via a test recipient pid; asserts that
+  `iteration_started` / `iteration_completed` are present and that the
+  `iteration` snapshot reaches the recipient via
+  `{:codex_worker_update, _, %{event: ..., iteration: 1}}`.
+- Asserts that `spec.command` pointing at the stub is honoured (the stub never
+  runs unless `command` was set on the spec).
+- Iteration cap: parameterise the test with
+  `(pipeline_cap, agent_cap) ∈ {(1, 5), (5, 2), (3, 3)}` and assert the
+  observed turn count equals `min`.
+- Timeout override: build a spec with a `:turn_timeout_ms` override smaller
+  than the global Config default, run with a stub that sleeps past it, and
+  assert the runner returns `{:error, :turn_timeout}` from the override
+  budget — not the global one.
+
+The bulk of `app_server_test.exs` keeps passing unchanged; the new tests are
+purely additive.
+
+## Dependencies
+
+- **Phase 2 (Runner Behaviour + Codex runner extraction)** — required. This
+  phase implements an additional `@behaviour SymphonyElixir.Pipelines.Runner`
+  callback module. It also depends on Phase 2's `:overrides` keyword on
+  `Codex.AppServer.start_session/2` and the snapshot/presenter `pipeline` /
+  `pipeline_kind` field plumbing.
+- **Phase 1 (Schema + Spec resolver)** — transitive (Phase 2 already depends on
+  it). The runner reads pre-resolved `Spec` structs; it never reads
+  `Config.settings!().pipelines` directly.
+
+## Risks
+
+### `stall_timeout_ms` semantics for long-running stages
+
+From plan §6: the `claude-pipeline` default `stall_timeout_ms` is 600 s (vs
+300 s for Codex) because stage transitions take longer than typical Codex
+turns. But the Orchestrator's stall check
+(`orchestrator.ex:448-449` reads `Config.settings!().codex.stall_timeout_ms`,
+which Phase 2 changes to read the active spec's value) is purely event-driven.
+A pipeline that goes silent between stages — no `notification` events — gets
+killed even though it is technically still working.
+
+**Mitigations** (carried forward from plan §6):
+
+1. Document in the `ClaudePipeline` module docstring that subprocesses MUST
+   emit stage-boundary notifications (see next risk).
+2. Add a `Logger.warning` if no event has been observed within
+   `stall_timeout_ms / 2`, so the symptom is diagnosable in logs before the
+   reconciliation kill happens.
+3. Surface the per-worker `stall_timeout_ms_snapshot` (added in Phase 2) in
+   running-entry payloads so operators can see what budget the worker is on.
+
+### Document the requirement that subprocesses MUST emit stage-boundary notifications
+
+The contract is binding. Module docstring will state, in normative MUST/SHOULD
+language:
+
+- Subprocesses MUST emit at least one JSON-RPC `notification` message at every
+  stage boundary (plan §6 mitigation; proposal §"Observability").
+- Subprocesses SHOULD include a human-readable summary in `params` (e.g.
+  `"implement stage complete"`, `"review score: 8/10"`) for log readability.
+- Subprocesses MAY emit `iteration_started` / `iteration_completed`
+  notifications; the runner uses them to populate the OPTIONAL `iteration`
+  snapshot field.
+
+The reference Claude pipeline binaries shipped by teams should follow this
+contract. Failure to do so will surface as spurious stall kills, which the
+warning at `stall_timeout_ms / 2` makes easy to attribute to the silent
+subprocess rather than to Symphony's reconciliation.
