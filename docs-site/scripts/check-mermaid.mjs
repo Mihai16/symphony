@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Validates every fenced ```mermaid block under docs-site/docs/ by feeding it
-// through mermaid.parse(). MDX decodes HTML entities like &lt; inside fenced
-// code blocks at render time, so we decode them here before parsing — that's
-// what trips the runtime parser otherwise (see issue #12).
+// through mermaid.parse(). Docusaurus passes the raw fenced-block content to
+// the Mermaid runtime, so we parse the raw text here too — any HTML entities
+// like &lt; reach Mermaid's lexer literally and will (correctly) fail.
 
 import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
@@ -41,19 +41,6 @@ async function* walk(dir) {
   }
 }
 
-const ENTITIES = {
-  '&lt;': '<',
-  '&gt;': '>',
-  '&amp;': '&',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&apos;': "'",
-};
-
-function decodeEntities(text) {
-  return text.replace(/&(?:lt|gt|amp|quot|apos|#39);/g, (m) => ENTITIES[m]);
-}
-
 function extractMermaidBlocks(text) {
   const lines = text.split(/\r?\n/);
   const blocks = [];
@@ -86,9 +73,8 @@ for await (const fileUrl of walk(DOCS_ROOT)) {
   const blocks = extractMermaidBlocks(text);
   for (const { content, line } of blocks) {
     checked++;
-    const decoded = decodeEntities(content);
     try {
-      await mermaid.parse(decoded);
+      await mermaid.parse(content);
     } catch (err) {
       failed++;
       const rel = relative(cwd, filePath);
