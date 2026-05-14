@@ -85,26 +85,42 @@ See `.claude/skills/start-issue-branch/` for the full procedure.
 Skills `manage-issue` handles create/update/close. Always check for an existing issue before
 filing — searching by title keywords prevents duplicates.
 
-## Wiki Documentation
+## Documentation — the four homes
 
-The GitHub wiki is the canonical home for:
+Symphony has four documentation surfaces. Mixing them up is the most common source of drift.
+Pick the right one *before* writing.
 
-- Operator-facing how-tos ("How to swap pipelines without restart", "How to add an SSH worker").
-- Architectural decision records summarizing accepted proposals.
-- Conventions visible to humans interacting with the repo (this file's content,
-  reproduced in operator-friendly form).
-- Glossary of project-specific terms.
+| Surface                     | Audience               | Lives in                          | Owned by skill        |
+|-----------------------------|------------------------|-----------------------------------|-----------------------|
+| `SPEC.md` (repo root)       | Spec readers, conformance implementers | repo                       | (none — edit directly) |
+| Developer docs site         | Contributors / architects | `docs-site/` (Docusaurus + MDX + Mermaid; deployed to GitHub Pages) | `manage-docs`         |
+| GitHub wiki                 | Operators              | `git@github.com:Mihai16/symphony.wiki.git` (separate repo) | `manage-wiki` / `audit-wiki` |
+| `proposals/`                | Anyone, in-flight      | `proposals/<slug>.md` in repo     | (none — edit directly) |
 
-The wiki is **not** the home for:
+**What goes where (one-line rules):**
 
-- API/contract reference — that lives in `SPEC.md`.
-- Source-of-truth schemas or examples — those live next to the code in `elixir/`.
-- In-flight design discussion — that lives in `proposals/` until accepted.
+- The **spec** is the contract. If conformance depends on it, it goes in `SPEC.md`. Nothing else
+  duplicates the spec — pages link to it.
+- The **docs site** is *contributor explanation*: architecture pages, ADRs, design notes,
+  subsystem deep-dives. Files are `.mdx` (or `.md`) with Mermaid for diagrams. GitHub renders the
+  source; the deployed site adds sidebar + search. New architecture decisions land here.
+- The **wiki** is *operator how-to*: "how to swap pipelines", "how to add an SSH worker", glossary
+  of operational terms. Not for contributor-facing internals.
+- **`proposals/`** is *in-flight design*: drafts that have not been accepted. When a proposal is
+  accepted, the *implementation* may land first; the durable explanation goes to the docs site
+  (architecture page), and the proposal stays in `proposals/` as historical record.
+
+**Architectural decision records** belong on the docs site under `docs-site/docs/architecture/`,
+embedded inline in the architecture page they belong to (one heading per ADR), NOT on the wiki —
+this is a change from the earlier convention. Operators rarely need ADRs; contributors always do.
 
 **Rule:** if a PR changes user-facing behavior, operator procedure, or shared convention, it
 includes a wiki update in the same change set when the wiki page exists locally, or a follow-up
-wiki update committed within one working day if the wiki is checked out separately. Code-only
-internal refactors do not need wiki updates. See `.claude/skills/manage-wiki/`.
+wiki update committed within one working day if the wiki is checked out separately. If a PR
+changes contributor-facing architecture or design, it includes a `docs-site/` page update in the
+*same* commit (the docs site is in-repo; there is no excuse for drift). Code-only internal
+refactors with no architectural shift do not need either. See `.claude/skills/manage-docs/` and
+`.claude/skills/manage-wiki/`.
 
 ## Wiki Freshness
 
@@ -126,10 +142,15 @@ See `.claude/skills/audit-wiki/` for the audit procedure.
 
 ## Architecture Work
 
-When asked to produce architecture documents (e.g. `ARCHITECTURE.md`), design notes, or any
-artifact that requires *making decisions* on top of an existing proposal or plan, you OWN the
-decisions. Read the relevant inputs (proposal, plan, code) and commit to specific choices with
-rationale — do not return a menu of options without picking one.
+When asked to produce architecture documents, design notes, or any artifact that requires
+*making decisions* on top of an existing proposal or plan, you OWN the decisions. Read the
+relevant inputs (proposal, plan, code) and commit to specific choices with rationale — do not
+return a menu of options without picking one.
+
+Architecture pages live under `docs-site/docs/architecture/<slug>.mdx` (see `manage-docs`).
+ADRs are embedded inline in the architecture page they belong to, one H3/H4 heading per ADR.
+The repo-root `ARCHITECTURE.md` is now a stub redirect to the docs site; new architecture
+content does **not** go there.
 
 If the task is too hard to do alone (large unfamiliar codebase, deep cross-module trade-offs,
 multiple architectural styles in tension, or a decision that hinges on code you haven't
