@@ -43,3 +43,22 @@ npm run build
 
 Produces a static site under `build/`. CI does this on every push to `main` and deploys to
 GitHub Pages via `.github/workflows/docs.yml`.
+
+## Validate Mermaid diagrams
+
+Mermaid blocks are rendered client-side, so syntax errors don't surface during `npm run build`.
+A separate check pipes every fenced ` ```mermaid ` block under `docs/` through `mermaid.parse()`:
+
+```bash
+npm run check:mermaid
+```
+
+CI runs the same script on every pull request that touches `docs-site/**` (see
+`.github/workflows/docs-check.yml`).
+
+To debug a single diagram by rendering it, drop the block into a `diagram.mmd` file and run
+`@mermaid-js/mermaid-cli`:
+
+```bash
+npx -p @mermaid-js/mermaid-cli mmdc -i diagram.mmd -o /tmp/out.svg
+```

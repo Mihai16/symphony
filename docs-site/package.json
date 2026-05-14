@@ -8,7 +8,8 @@
     "build": "docusaurus build",
     "serve": "docusaurus serve",
     "clear": "docusaurus clear",
-    "typecheck": "tsc --noEmit || true"
+    "typecheck": "tsc --noEmit || true",
+    "check:mermaid": "node scripts/check-mermaid.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.5.2",
@@ -22,7 +23,9 @@
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "3.5.2",
-    "@docusaurus/types": "3.5.2"
+    "@docusaurus/types": "3.5.2",
+    "jsdom": "^25.0.1",
+    "mermaid": "^10.9.1"
   },
   "overrides": {
     "webpack": "5.99.9"
