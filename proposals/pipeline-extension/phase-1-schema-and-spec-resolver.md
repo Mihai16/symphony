@@ -1,0 +1,302 @@
+# Phase 1 — Pipeline Schema and Spec Resolver
+
+> Tracking issue: [#19](https://github.com/Mihai16/symphony/issues/19)
+> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 1) and §3.1–3.3, §8.
+> Companion proposal: [`pipeline-extension.md`](../pipeline-extension.md).
+
+## Summary
+
+Add the `pipeline` and `pipelines` keys to `Config.Schema`, and introduce a single
+`SymphonyElixir.Pipelines.Spec` resolver that returns the runtime pipeline a worker should use.
+When only the legacy `codex` block is present, the resolver synthesises a `__default_codex` spec
+so the rest of the system can stop branching on "pipeline vs legacy". Validation is extended to
+reject unsupported `kind` values and to surface resolver errors through the existing
+`Config.validate!/0` flow.
+
+This phase is intentionally inert: no code path actually consumes the resolved spec yet — Phase 2
+wires it into `AgentRunner`. The goal is to land the data model and validation contract behind a
+shim that preserves today's behaviour bit-for-bit.
+
+## Goals
+
+- Parse `pipeline.use` and `pipelines.<name>` from workflow front matter.
+- Provide one choke point (`Pipelines.Spec.resolve/1`) that downstream callers will use to obtain
+  the active pipeline; nobody else pokes at `settings.pipeline`/`settings.pipelines` directly.
+- Preserve full backwards compatibility with the legacy top-level `codex` block via a
+  `__default_codex` shim.
+- Extend `Config.validate_semantics/1` and `format_config_error/1` so misconfigurations fail
+  preflight with operator-readable errors.
+
+## Non-Goals
+
+- Introducing the `Pipelines.Runner` behaviour or any concrete runner — that is Phase 2.
+- Moving `AgentRunner` off its direct `Codex.AppServer` call — Phase 2.
+- Wiring the active pipeline name into the snapshot/presenter — Phase 2.
+- Implementing `kind: claude-pipeline` — Phase 3.
+- Migrating direct `Config.settings!().codex.X` reads (e.g. the Orchestrator stall check at
+  `orchestrator.ex:448`) — Phase 2.
+- Dynamic-reload logging or per-tick pipeline-change tracing — Phase 4.
+- SPEC.md edits. Per the plan §4, those land alongside Phase 2 when behaviour first becomes
+  observable.
+
+## Files Touched
+
+New:
+
+- `elixir/lib/symphony_elixir/pipelines/spec.ex` — the resolver module and `%Spec{}` struct.
+- `elixir/test/symphony_elixir/pipelines/spec_test.exs` — resolver unit tests.
+
+Modified:
+
+- `elixir/lib/symphony_elixir/config/schema.ex` — add `Pipeline` and `PipelineDefinition` embeds,
+  the new top-level embeds (after the `codex` line at `schema.ex:270`), and the
+  `normalize_pipelines` step inside `parse/1` (`schema.ex:276`).
+- `elixir/lib/symphony_elixir/config.ex` — extend `validate_semantics/1` (`config.ex:117-134`) and
+  `format_config_error/1` (`config.ex:136-153`).
+- `elixir/test/symphony_elixir/workspace_and_config_test.exs` — six new parse/validate cases from
+  proposal §"Test and Validation Matrix Additions".
+
+> Line refs verified against the current source on 2026-05-14; the ranges in the plan match.
+
+## Detailed Change Set
+
+### Schema (`elixir/lib/symphony_elixir/config/schema.ex`)
+
+The existing `Codex` embedded schema (`schema.ex:153-200`) keeps its fields and defaults — no
+change. Add two new embedded modules and two new top-level embeds:
+
+```elixir
+defmodule Pipeline do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key false
+  embedded_schema do
+    field(:use, :string)
+  end
+
+  def changeset(schema, attrs) do
+    schema
+    |> cast(attrs, [:use], empty_values: [])
+  end
+end
+
+defmodule PipelineDefinition do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key false
+  embedded_schema do
+    field(:name, :string)
+    field(:kind, :string)
+    field(:command, :string)
+    # Codex-shared knobs (allow nil so we can fall back to defaults per-kind)
+    field(:approval_policy, StringOrMap)
+    field(:thread_sandbox, :string)
+    field(:turn_sandbox_policy, :map)
+    field(:turn_timeout_ms, :integer)
+    field(:read_timeout_ms, :integer)
+    field(:stall_timeout_ms, :integer)
+    # claude-pipeline knobs
+    field(:stages, {:array, :string})
+    field(:max_internal_iterations, :integer)
+    field(:review_threshold, :float)
+  end
+
+  def changeset(schema, attrs) do
+    schema
+    |> cast(attrs, [:name, :kind, :command, :approval_policy, :thread_sandbox,
+                    :turn_sandbox_policy, :turn_timeout_ms, :read_timeout_ms,
+                    :stall_timeout_ms, :stages, :max_internal_iterations,
+                    :review_threshold], empty_values: [])
+    |> validate_required([:name, :kind, :command])
+  end
+end
+```
+
+In the top-level `embedded_schema` block (`schema.ex:264-274`), append after the `codex` embed
+on line 270:
+
+```elixir
+embeds_one(:pipeline, Pipeline, on_replace: :update, defaults_to_struct: true)
+embeds_many(:pipelines, PipelineDefinition, on_replace: :delete)
+```
+
+`Schema.parse/1` (`schema.ex:276`) gains a `normalize_pipelines/1` step before `changeset/1`:
+
+- If `pipelines` decodes as a map, convert to a sorted-by-name list of definitions with `:name`
+  populated. Sorting keeps the list stable across reloads (see plan §6 risk on `embeds_many`).
+- If neither `pipelines` nor `pipeline` is present, leave the parse output untouched. The legacy
+  `codex` block still parses as today; the synthetic `__default_codex` shim is materialised inside
+  the resolver, not here.
+
+The legacy `codex` block stays untouched. `Config.codex_runtime_settings/2` and other direct
+readers continue to work for now; they migrate in Phase 2.
+
+### PipelineSpec Resolver (new module)
+
+Create `elixir/lib/symphony_elixir/pipelines/spec.ex` with a `%Spec{}` struct and a single
+`resolve/1`:
+
+```elixir
+defmodule SymphonyElixir.Pipelines.Spec do
+  @type t :: %__MODULE__{
+    name: String.t(),
+    kind: String.t(),
+    command: String.t(),
+    approval_policy: term(),
+    thread_sandbox: String.t() | nil,
+    turn_sandbox_policy: map() | nil,
+    turn_timeout_ms: pos_integer(),
+    read_timeout_ms: pos_integer(),
+    stall_timeout_ms: non_neg_integer(),
+    stages: [String.t()],
+    max_internal_iterations: pos_integer() | nil,
+    review_threshold: float() | nil
+  }
+
+  defstruct [:name, :kind, :command, :approval_policy, :thread_sandbox,
+             :turn_sandbox_policy, :turn_timeout_ms, :read_timeout_ms,
+             :stall_timeout_ms, :stages, :max_internal_iterations,
+             :review_threshold]
+
+  @spec resolve(SymphonyElixir.Config.Schema.t()) :: {:ok, t()} | {:error, term()}
+  def resolve(settings)
+end
+```
+
+`resolve/1` implements the three-step selection from proposal §"Selection Semantics":
+
+1. If `settings.pipeline.use` is set and matches an entry in `settings.pipelines`, return that
+   definition lifted into a `%Spec{}`. Per-kind defaults (e.g. Codex `turn_timeout_ms` 3_600_000)
+   fill in fields the user omitted.
+2. Else, fall back to the legacy `codex` block, materialising a synthetic
+   `%Spec{name: "__default_codex", kind: "codex", ...}` from `settings.codex`. (Because
+   `embeds_one(:codex, ..., defaults_to_struct: true)` is already set at `schema.ex:270`, this
+   fallback always succeeds when no explicit selection was made.)
+3. Else, `{:error, {:pipeline_unresolved, :missing}}`. Practically unreachable in v1 because step
+   2 always wins, but the clause exists so a future revision that drops the legacy block has a
+   well-typed failure mode.
+
+`resolve/1` is the only function that reads `settings.pipeline` or `settings.pipelines`. Phases
+2–4 will go through it without exception.
+
+### Validation (`elixir/lib/symphony_elixir/config.ex`)
+
+`validate!/0` (`config.ex:94`) already delegates to `validate_semantics/1`. Extend the latter
+(`config.ex:117-134`) to call the resolver after the existing tracker checks:
+
+```elixir
+defp validate_semantics(settings) do
+  cond do
+    is_nil(settings.tracker.kind) ->
+      {:error, :missing_tracker_kind}
+
+    settings.tracker.kind not in ["linear", "memory"] ->
+      {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
+
+    settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
+      {:error, :missing_linear_api_token}
+
+    settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
+      {:error, :missing_linear_project_slug}
+
+    true ->
+      case Pipelines.Spec.resolve(settings) do
+        {:ok, %Pipelines.Spec{kind: kind}} ->
+          if kind in supported_kinds(),
+            do: :ok,
+            else: {:error, {:unsupported_pipeline_kind, kind}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+  end
+end
+
+defp supported_kinds, do: ["codex", "claude-pipeline"]
+```
+
+The proposal validations covered here (proposal §"Validation"):
+
+- "If `pipelines` is present, `pipeline.use` MUST be present" — when `pipeline.use` is missing,
+  `resolve/1` returns `{:error, {:pipeline_unresolved, :no_selection}}`.
+- "`pipeline.use` MUST name a key in `pipelines`" — `{:error, {:pipeline_unresolved,
+  {:unknown, name}}}`.
+- "The selected pipeline's `kind` MUST be supported" — `{:error, {:unsupported_pipeline_kind,
+  kind}}`.
+- "The selected pipeline's `command` MUST be non-empty" — enforced by
+  `validate_required([:command])` in `PipelineDefinition.changeset/2`.
+- "Kind-specific required fields MUST be present" — Phase 1 enforces only the kind-agnostic
+  required fields (`kind`, `command`); per-kind required-field checks (e.g. `stages` for
+  `claude-pipeline`) move into the resolver and Phase 4 hardening.
+
+`format_config_error/1` (`config.ex:136-153`) gains clauses for `{:pipeline_unresolved, _}`,
+`{:unsupported_pipeline_kind, _}`, and `{:missing_pipeline_field, _, _}` so these errors surface
+legibly in operator logs via `Orchestrator.maybe_dispatch/1` (`orchestrator.ex:224-264`).
+
+## Acceptance Criteria
+
+From the plan §2 Phase 1 acceptance line, plus what §3.1–3.3 imply:
+
+- Existing tests pass unmodified — no behaviour change is introduced.
+- New parsing tests cover the shim: a workflow with only the legacy `codex` block resolves to a
+  `%Spec{name: "__default_codex", kind: "codex"}` with fields populated from the legacy block.
+- A workflow with `pipeline.use: my-codex` and a matching `pipelines:` entry of `kind: codex`
+  resolves to a spec that is functionally identical to the legacy block (same command, timeouts,
+  approval policy).
+- A workflow with `pipeline.use` referencing a missing pipeline name fails `Config.validate!/0`
+  with `{:error, {:pipeline_unresolved, {:unknown, name}}}`.
+- A workflow whose selected pipeline has an unsupported `kind` fails `Config.validate!/0` with
+  `{:error, {:unsupported_pipeline_kind, kind}}`.
+- A workflow whose selected pipeline has an empty `command` fails parse with an
+  `{:invalid_workflow_config, _}` error referencing the `command` field.
+- `format_config_error/1` returns a non-`inspect`-only string for each new error tuple (operator
+  legibility).
+- No code outside `Pipelines.Spec.resolve/1` reads `settings.pipeline` or `settings.pipelines`.
+
+## Test Plan
+
+- `elixir/test/symphony_elixir/pipelines/spec_test.exs` (new):
+  - Resolves explicit `pipeline.use` against `pipelines.<name>`.
+  - Resolves the legacy `codex` block to `__default_codex`.
+  - Returns the unknown-name error tuple.
+  - Returns the missing-selection error tuple when neither path is available.
+- `elixir/test/symphony_elixir/workspace_and_config_test.exs` (extend): the six cases from
+  proposal §"Test and Validation Matrix Additions" — only the parse/validate-shaped ones (the
+  dynamic-reload cases are Phase 4).
+- Run `mix test` and confirm zero diffs in pre-existing test files beyond the
+  `workspace_and_config_test.exs` extensions.
+
+## Dependencies
+
+None. Phase 1 is the foundational change and depends on no prior work.
+
+Phases 2, 3, and 4 all depend on this PR landing first.
+
+## Risks
+
+- **Schema migration drift.** Two paths reach Codex behaviour: the legacy block, and the
+  `__default_codex` synthetic spec. *Mitigation:* `Spec.resolve/1` is the single reader; Phase 2
+  migrates the remaining direct `Config.settings!().codex.X` callers (notably
+  `orchestrator.ex:448`).
+- **`embeds_many` over a YAML map.** Ecto's `embeds_many` is list-ordered; the YAML source is a
+  map. *Mitigation:* the `normalize_pipelines/1` step sorts by name so reloads are deterministic;
+  `Spec.resolve/1` does an `Enum.find/2` by name, so callers see map semantics.
+- **Inert code rotting.** Because nothing consumes `Spec.resolve/1` until Phase 2, regressions in
+  the resolver could go unnoticed. *Mitigation:* the resolver is exercised by both
+  `spec_test.exs` and the validation path inside `Config.validate_semantics/1`, which runs on
+  every dispatch tick.
+
+## Follow-ups (later phases)
+
+- [`./phase-2-runner-strategy-extraction.md`](./phase-2-runner-strategy-extraction.md) —
+  introduce the `Pipelines.Runner` behaviour, lift the Codex turn loop out of `AgentRunner` into
+  `Pipelines.Codex`, dispatch on `Spec.kind`, and surface `pipeline` in the snapshot/presenter.
+- [`./phase-3-claude-pipeline-runner.md`](./phase-3-claude-pipeline-runner.md) — add
+  `Pipelines.ClaudePipeline` as a configuration adapter over `Codex.AppServer`, applying
+  `command`, `max_internal_iterations`, and stall overrides from the spec.
+- [`./phase-4-dynamic-reload-and-validation.md`](./phase-4-dynamic-reload-and-validation.md) —
+  wire `pipeline.use`/`pipelines.<name>` changes into the existing `WorkflowStore` reload path,
+  harden per-kind validation, and add the dynamic-reload test cases from proposal §"Test and
+  Validation Matrix Additions".
