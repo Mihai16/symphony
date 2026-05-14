@@ -122,6 +122,19 @@ changes contributor-facing architecture or design, it includes a `docs-site/` pa
 refactors with no architectural shift do not need either. See `.claude/skills/manage-docs/` and
 `.claude/skills/manage-wiki/`.
 
+## Post-Push CI Check
+
+After pushing a branch or merging a PR, **check the resulting workflow runs before reporting
+"done"** — silence from CI is not success. This applies in particular to pushes that land on
+`main` (no PR for me to subscribe to via `subscribe_pr_activity`), and to workflows that only
+trigger on `main` such as `Deploy docs site` (`.github/workflows/docs.yml`).
+
+Procedure: after a push or merge, fetch the latest commit on the affected branch via
+`mcp__github__get_commit` (or `mcp__github__pull_request_read` with `method=get_check_runs` for
+PR-bound work), wait briefly for runs to register, and confirm conclusion is `success` for every
+check that fires. If any check fails, investigate before handing back — don't make the user notice
+the red dot.
+
 ## Wiki Freshness
 
 The wiki drifts. To counter this, run an audit:
