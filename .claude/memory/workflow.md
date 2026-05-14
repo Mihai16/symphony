@@ -65,12 +65,16 @@ See `.claude/skills/start-issue-branch/` for the full procedure.
   when no issue exists (e.g. the trivial-change carve-out above, or a hotfix being filed as its
   own issue). In every other case: tie the PR to its issue with a closing keyword.
 - PR title: same as the issue title, or a closely related rewording. Keep under 70 chars.
-- PR body has two sections at minimum: **Summary** (1–3 bullets, the why) and **Test plan**
-  (markdown checklist).
+- PR body must follow `.github/pull_request_template.md` — five `####` sections (Context, TL;DR,
+  Summary, Alternatives, Test Plan), in that order, no `<!--` leftovers, bullets in Summary,
+  checkboxes in Test Plan. `pr-description-lint` enforces this and fails the PR otherwise.
 - One PR per issue. If a single issue's scope grows during work, file follow-up issues for the
   excess; don't expand the PR.
 - PRs are created only when the user explicitly asks. Do not open PRs proactively unless the
   user's request implies it ("ship it", "open a PR", etc.).
+
+See `.claude/skills/create-pr/` for the full procedure (template rules, lint checks, body
+skeleton).
 
 ## Issue Lifecycle
 
