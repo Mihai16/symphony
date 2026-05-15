@@ -50,6 +50,16 @@ From `.claude/memory/workflow.md`:
 
 - **Body opens with `Closes #<n>`** (or `Fixes #N` / `Resolves #N`). If the PR resolves multiple
   issues, list each: `Closes #N, Closes #M`. Skip only if no issue exists.
+- **⚠️ This repo auto-closes EVERY issue referenced anywhere in the PR body, not just ones with a
+  closing keyword.** Per the repo's GitHub configuration, *any* `#N` mention in the PR body (or in
+  a commit message that lands on `main`) will close issue `N` when the PR merges — `Closes`/`Fixes`
+  is not required to trigger it. Therefore: the PR body must reference **only** the issue numbers
+  you actually intend to close. Do **not** write bare `#N` for context/related issues. In
+  particular, **never** mention the always-open umbrella (currently issue 32) or any other
+  tracking/standing issue as `#32` in a PR body — it will be force-closed. When you need to refer
+  to a related-but-not-closing issue, write it without the `#` linkifier (e.g. "the skill/memory
+  umbrella issue", "umbrella issue 32", "see issue 30") so GitHub does not create a closing
+  reference. Re-scan the whole body in Step 6 for stray `#N` tokens.
 - **Title** matches the issue title or a close rewording. Keep under 70 chars.
 - **One PR per issue.** If scope grows, file a follow-up issue (`manage-issue`); don't expand the
   PR.
@@ -108,6 +118,10 @@ Before calling `mcp__github__create_pull_request`, scan the body once more:
 - Confirm `#### Summary` has at least one `- ` bullet.
 - Confirm `#### Test Plan` has at least one `- [ ] ` or `- [x] ` checkbox.
 - Confirm the body opens with `Closes #N` (unless explicitly no issue).
+- **Scan the entire body for every `#N` token.** Each one will close issue `N` on merge (this
+  repo's setting). Confirm every `#N` present is an issue you intend to close. Rewrite any
+  context/related reference (especially the umbrella issue 32 and other standing issues) to a
+  non-linkifying form ("issue 30", "the umbrella issue") so it is not force-closed.
 - Confirm the title is ≤ 70 chars.
 
 ### Step 7 — Open the PR
