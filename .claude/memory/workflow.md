@@ -97,6 +97,47 @@ skeleton).
 Skills `manage-issue` handles create/update/close. Always check for an existing issue before
 filing — searching by title keywords prevents duplicates.
 
+## Blockers
+
+A **blocker** is anything that prevents the current unit of work from being completed correctly
+*in this session* (unreadable CI logs, an environment/credential gap, a missing dependency, a
+decision the session can't make). Do **not** improvise with repeated blind fix pushes. The
+blocker **is an issue in itself**:
+
+1. **Detect** — recognize the wall at any stage (triage, implementation, PR-creation). Two failed
+   fix attempts at the same wall is the cue, not the third.
+2. **File** — open a dedicated issue: root cause, what is blocked, what was tried, what a fix
+   needs (`manage-issue`).
+3. **Link** the blocker to the blocked item, in priority order:
+   - **Native `blocked_by` (primary, confirmed working):**
+     `gh api --method POST repos/OWNER/REPO/issues/<blocked#>/dependencies/blocked_by -F issue_id=<blocking-issue DATABASE id>`;
+     verify with `gh api repos/OWNER/REPO/issues/<blocked#>/dependencies/blocked_by`. `-F` =
+     typed integer (`-f` → `422`); `issue_id` is the **database id**, not the issue number. A
+     `403` POST with a `200` on the identical `GET` is a PAT-scope gap, *not* the #29
+     egress-allowlist failure.
+   - **Sub-issue (complementary):** `mcp__github__sub_issue_write`, `method: add`,
+     `issue_number` = blocked **issue** (PRs can't be parents), `sub_issue_id` = blocker's
+     **database id**.
+   - **Emulation (human-readable, not load-bearing):** `⛔ Blocked by #N` comment on the blocked
+     issue + `⛔ Blocked by #N — do not merge` line in the blocked PR's checklist.
+4. **Stop** — no speculative fixes; `unsubscribe_pr_activity` on the blocked PR so identical CI
+   failures don't retrigger blind cycles.
+5. **Human review first** — a freshly filed issue requires human review *before* work starts.
+   Sessions must not self-start an issue they just filed.
+
+A blocker issue SHOULD carry a **handoff document** (markdown, posted as an issue comment)
+capturing enough state — what was tried, exact commands/output, the wall, the smallest next step
+— for a fresh session to resume without re-deriving context.
+
+**Afterthought sub-case:** an important gap the originating issue missed, discovered mid-work, is
+*not* a blocker (current work continues) but must be filed, linked to the current issue, and
+resolved **before the current PR merges** (`do not merge until #N resolved` on the PR checklist)
+— tracked, never silently folded in or dropped.
+
+See `.claude/memory/blocker-protocol.md` and `.claude/skills/blocker-protocol/` for the full
+procedure. The CI-log-retrieval case is the specialization in `.claude/memory/ci-triage.md` /
+`.claude/skills/ci-failure-triage/` (#29).
+
 ## Documentation — the four homes
 
 Symphony has four documentation surfaces. Mixing them up is the most common source of drift.
