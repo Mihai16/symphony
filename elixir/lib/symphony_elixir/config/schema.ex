@@ -261,6 +261,75 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defmodule Pipeline do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:use, :string)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:use], empty_values: [])
+    end
+  end
+
+  defmodule PipelineDefinition do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    alias SymphonyElixir.Config.Schema.StringOrMap
+
+    @primary_key false
+    embedded_schema do
+      field(:name, :string)
+      field(:kind, :string)
+      field(:command, :string)
+      field(:approval_policy, StringOrMap)
+      field(:thread_sandbox, :string)
+      field(:turn_sandbox_policy, :map)
+      field(:turn_timeout_ms, :integer)
+      field(:read_timeout_ms, :integer)
+      field(:stall_timeout_ms, :integer)
+      field(:stages, {:array, :string})
+      field(:max_internal_iterations, :integer)
+      field(:review_threshold, :float)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(
+        attrs,
+        [
+          :name,
+          :kind,
+          :command,
+          :approval_policy,
+          :thread_sandbox,
+          :turn_sandbox_policy,
+          :turn_timeout_ms,
+          :read_timeout_ms,
+          :stall_timeout_ms,
+          :stages,
+          :max_internal_iterations,
+          :review_threshold
+        ],
+        empty_values: []
+      )
+      |> validate_required([:name, :kind, :command])
+      |> validate_number(:turn_timeout_ms, greater_than: 0)
+      |> validate_number(:read_timeout_ms, greater_than: 0)
+      |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
+      |> validate_number(:max_internal_iterations, greater_than: 0)
+    end
+  end
+
   embedded_schema do
     embeds_one(:tracker, Tracker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:polling, Polling, on_replace: :update, defaults_to_struct: true)
@@ -268,6 +337,8 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:worker, Worker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:agent, Agent, on_replace: :update, defaults_to_struct: true)
     embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:pipeline, Pipeline, on_replace: :update, defaults_to_struct: true)
+    embeds_many(:pipelines, PipelineDefinition, on_replace: :delete)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
@@ -278,6 +349,7 @@ defmodule SymphonyElixir.Config.Schema do
     config
     |> normalize_keys()
     |> drop_nil_values()
+    |> normalize_pipelines()
     |> changeset()
     |> apply_action(:validate)
     |> case do
@@ -360,10 +432,30 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:worker, with: &Worker.changeset/2)
     |> cast_embed(:agent, with: &Agent.changeset/2)
     |> cast_embed(:codex, with: &Codex.changeset/2)
+    |> cast_embed(:pipeline, with: &Pipeline.changeset/2)
+    |> cast_embed(:pipelines, with: &PipelineDefinition.changeset/2)
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
   end
+
+  defp normalize_pipelines(%{"pipelines" => pipelines} = attrs) when is_map(pipelines) do
+    list =
+      pipelines
+      |> Enum.map(fn {name, definition} ->
+        definition
+        |> ensure_map()
+        |> Map.put("name", to_string(name))
+      end)
+      |> Enum.sort_by(&Map.get(&1, "name"))
+
+    Map.put(attrs, "pipelines", list)
+  end
+
+  defp normalize_pipelines(attrs), do: attrs
+
+  defp ensure_map(value) when is_map(value), do: value
+  defp ensure_map(_value), do: %{}
 
   defp finalize_settings(settings) do
     tracker = %{
@@ -543,7 +635,13 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp flatten_errors(errors, prefix) when is_list(errors) do
-    Enum.map(errors, &(prefix <> " " <> &1))
+    if Enum.all?(errors, &is_binary/1) do
+      Enum.map(errors, &(prefix <> " " <> &1))
+    else
+      errors
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {entry, index} -> flatten_errors(entry, "#{prefix}.#{index}") end)
+    end
   end
 
   defp translate_error({message, options}) do
