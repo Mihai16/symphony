@@ -4,6 +4,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   alias SymphonyElixir.Config.Schema
   alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
   alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.Pipelines.Spec
 
   test "workspace bootstrap can be implemented in after_create hook" do
     test_root =
@@ -1311,7 +1312,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert :ok = Config.validate!()
 
       assert {:ok, settings} = Config.settings()
-      assert {:ok, spec} = SymphonyElixir.Pipelines.Spec.resolve(settings)
+      assert {:ok, spec} = Spec.resolve(settings)
       assert spec.name == "__default_codex"
       assert spec.kind == "codex"
       assert spec.command == "codex app-server"
@@ -1330,7 +1331,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert :ok = Config.validate!()
 
       assert {:ok, settings} = Config.settings()
-      assert {:ok, spec} = SymphonyElixir.Pipelines.Spec.resolve(settings)
+      assert {:ok, spec} = Spec.resolve(settings)
       assert spec.name == "my-codex"
       assert spec.kind == "codex"
       assert spec.command == "codex app-server --custom"

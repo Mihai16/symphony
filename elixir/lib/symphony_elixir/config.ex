@@ -149,37 +149,43 @@ defmodule SymphonyElixir.Config do
   end
 
   @spec format_config_error(term()) :: String.t()
-  def format_config_error(reason) do
-    case reason do
-      {:invalid_workflow_config, message} ->
-        "Invalid WORKFLOW.md config: #{message}"
+  def format_config_error({:invalid_workflow_config, message}) do
+    "Invalid WORKFLOW.md config: #{message}"
+  end
 
-      {:missing_workflow_file, path, raw_reason} ->
-        "Missing WORKFLOW.md at #{path}: #{inspect(raw_reason)}"
+  def format_config_error({:missing_workflow_file, path, raw_reason}) do
+    "Missing WORKFLOW.md at #{path}: #{inspect(raw_reason)}"
+  end
 
-      {:workflow_parse_error, raw_reason} ->
-        "Failed to parse WORKFLOW.md: #{inspect(raw_reason)}"
+  def format_config_error({:workflow_parse_error, raw_reason}) do
+    "Failed to parse WORKFLOW.md: #{inspect(raw_reason)}"
+  end
 
-      :workflow_front_matter_not_a_map ->
-        "Failed to parse WORKFLOW.md: workflow front matter must decode to a map"
+  def format_config_error(:workflow_front_matter_not_a_map) do
+    "Failed to parse WORKFLOW.md: workflow front matter must decode to a map"
+  end
 
-      {:pipeline_unresolved, {:unknown, name}} ->
-        "pipeline.use references unknown pipeline #{inspect(name)}"
+  def format_config_error({:pipeline_unresolved, {:unknown, name}}) do
+    "pipeline.use references unknown pipeline #{inspect(name)}"
+  end
 
-      {:pipeline_unresolved, :no_selection} ->
-        "pipelines configured but pipeline.use is not set"
+  def format_config_error({:pipeline_unresolved, :no_selection}) do
+    "pipelines configured but pipeline.use is not set"
+  end
 
-      {:pipeline_unresolved, :missing} ->
-        "no pipeline available: neither pipeline.use nor a legacy codex block is configured"
+  def format_config_error({:pipeline_unresolved, :missing}) do
+    "no pipeline available: neither pipeline.use nor a legacy codex block is configured"
+  end
 
-      {:unsupported_pipeline_kind, kind} ->
-        "unsupported pipeline kind #{inspect(kind)}; expected one of #{inspect(@supported_pipeline_kinds)}"
+  def format_config_error({:unsupported_pipeline_kind, kind}) do
+    "unsupported pipeline kind #{inspect(kind)}; expected one of #{inspect(@supported_pipeline_kinds)}"
+  end
 
-      {:missing_pipeline_field, name, field} ->
-        "pipeline #{inspect(name)} is missing required field #{inspect(field)}"
+  def format_config_error({:missing_pipeline_field, name, field}) do
+    "pipeline #{inspect(name)} is missing required field #{inspect(field)}"
+  end
 
-      other ->
-        "Invalid WORKFLOW.md config: #{inspect(other)}"
-    end
+  def format_config_error(other) do
+    "Invalid WORKFLOW.md config: #{inspect(other)}"
   end
 end
