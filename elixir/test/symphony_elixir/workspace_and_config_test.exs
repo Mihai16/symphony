@@ -1303,4 +1303,124 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.rm_rf(test_root)
     end
   end
+
+  describe "pipeline schema and Spec resolver" do
+    test "legacy codex-only workflow continues to load and validate under __default_codex" do
+      write_pipeline_workflow!()
+
+      assert :ok = Config.validate!()
+
+      assert {:ok, settings} = Config.settings()
+      assert {:ok, spec} = SymphonyElixir.Pipelines.Spec.resolve(settings)
+      assert spec.name == "__default_codex"
+      assert spec.kind == "codex"
+      assert spec.command == "codex app-server"
+    end
+
+    test "workflow with pipeline.use and matching pipelines entry loads and validates" do
+      write_pipeline_workflow!("""
+      pipeline:
+        use: my-codex
+      pipelines:
+        my-codex:
+          kind: codex
+          command: codex app-server --custom
+      """)
+
+      assert :ok = Config.validate!()
+
+      assert {:ok, settings} = Config.settings()
+      assert {:ok, spec} = SymphonyElixir.Pipelines.Spec.resolve(settings)
+      assert spec.name == "my-codex"
+      assert spec.kind == "codex"
+      assert spec.command == "codex app-server --custom"
+    end
+
+    test "pipeline.use referencing a missing pipeline fails preflight with a typed error" do
+      write_pipeline_workflow!("""
+      pipeline:
+        use: nope
+      pipelines:
+        present:
+          kind: codex
+          command: codex app-server
+      """)
+
+      assert {:error, {:pipeline_unresolved, {:unknown, "nope"}}} = Config.validate!()
+    end
+
+    test "selected pipeline with an unsupported kind fails preflight validation" do
+      write_pipeline_workflow!("""
+      pipeline:
+        use: weird
+      pipelines:
+        weird:
+          kind: weird-runner
+          command: weird-runner serve
+      """)
+
+      assert {:error, {:unsupported_pipeline_kind, "weird-runner"}} = Config.validate!()
+    end
+
+    test "selected pipeline with an empty command fails parse referencing the command field" do
+      write_pipeline_workflow!("""
+      pipeline:
+        use: empty
+      pipelines:
+        empty:
+          kind: codex
+          command: ""
+      """)
+
+      assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+      assert message =~ "command"
+    end
+
+    test "format_config_error returns operator-legible strings for the new error tuples" do
+      unknown = Config.format_config_error({:pipeline_unresolved, {:unknown, "nope"}})
+      assert unknown =~ "pipeline.use references unknown pipeline"
+      assert unknown =~ "nope"
+
+      no_selection = Config.format_config_error({:pipeline_unresolved, :no_selection})
+      assert no_selection =~ "pipeline.use is not set"
+
+      missing = Config.format_config_error({:pipeline_unresolved, :missing})
+      assert missing =~ "no pipeline available"
+
+      unsupported = Config.format_config_error({:unsupported_pipeline_kind, "weird-runner"})
+      assert unsupported =~ "unsupported pipeline kind"
+      assert unsupported =~ "weird-runner"
+
+      missing_field = Config.format_config_error({:missing_pipeline_field, "p1", :command})
+      assert missing_field =~ "missing required field"
+      assert missing_field =~ "p1"
+
+      refute unknown == inspect({:pipeline_unresolved, {:unknown, "nope"}})
+    end
+  end
+
+  defp write_pipeline_workflow!(extra_yaml \\ "") do
+    workflow = """
+    ---
+    tracker:
+      kind: linear
+      endpoint: https://api.linear.app/graphql
+      api_key: token
+      project_slug: project
+    workspace:
+      root: #{Path.join(System.tmp_dir!(), "symphony_workspaces")}
+    codex:
+      command: codex app-server
+    #{extra_yaml}---
+    You are an agent for this repository.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+
+    if Process.whereis(SymphonyElixir.WorkflowStore) do
+      SymphonyElixir.WorkflowStore.force_reload()
+    end
+
+    :ok
+  end
 end

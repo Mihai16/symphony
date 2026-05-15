@@ -4,7 +4,10 @@ defmodule SymphonyElixir.Config do
   """
 
   alias SymphonyElixir.Config.Schema
+  alias SymphonyElixir.Pipelines
   alias SymphonyElixir.Workflow
+
+  @supported_pipeline_kinds ["codex", "claude-pipeline"]
 
   @default_prompt_template """
   You are working on a Linear issue.
@@ -129,11 +132,24 @@ defmodule SymphonyElixir.Config do
         {:error, :missing_linear_project_slug}
 
       true ->
-        :ok
+        validate_pipeline(settings)
     end
   end
 
-  defp format_config_error(reason) do
+  defp validate_pipeline(settings) do
+    case Pipelines.Spec.resolve(settings) do
+      {:ok, %Pipelines.Spec{kind: kind}} ->
+        if kind in @supported_pipeline_kinds,
+          do: :ok,
+          else: {:error, {:unsupported_pipeline_kind, kind}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec format_config_error(term()) :: String.t()
+  def format_config_error(reason) do
     case reason do
       {:invalid_workflow_config, message} ->
         "Invalid WORKFLOW.md config: #{message}"
@@ -146,6 +162,21 @@ defmodule SymphonyElixir.Config do
 
       :workflow_front_matter_not_a_map ->
         "Failed to parse WORKFLOW.md: workflow front matter must decode to a map"
+
+      {:pipeline_unresolved, {:unknown, name}} ->
+        "pipeline.use references unknown pipeline #{inspect(name)}"
+
+      {:pipeline_unresolved, :no_selection} ->
+        "pipelines configured but pipeline.use is not set"
+
+      {:pipeline_unresolved, :missing} ->
+        "no pipeline available: neither pipeline.use nor a legacy codex block is configured"
+
+      {:unsupported_pipeline_kind, kind} ->
+        "unsupported pipeline kind #{inspect(kind)}; expected one of #{inspect(@supported_pipeline_kinds)}"
+
+      {:missing_pipeline_field, name, field} ->
+        "pipeline #{inspect(name)} is missing required field #{inspect(field)}"
 
       other ->
         "Invalid WORKFLOW.md config: #{inspect(other)}"
