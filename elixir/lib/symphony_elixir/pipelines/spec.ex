@@ -101,5 +101,4 @@ defmodule SymphonyElixir.Pipelines.Spec do
       review_threshold: nil
     }
   end
-
 end
