@@ -1,6 +1,6 @@
 ---
 name: blocker-protocol
-description: Handle a blocker — something that prevents the current unit of work from completing correctly this session. Use when CI/triage can't determine the real problem, an environment/credential gap blocks the fix, two fix attempts hit the same wall, or a mid-work gap (afterthought) is discovered. File the blocker as its own issue, link it (native blocked_by → sub-issue → ⛔ emulation), stop, and hand back for mandatory human review. Pairs with manage-issue and ci-failure-triage.
+description: Handle a blocker — something that prevents the current unit of work from completing correctly this session. Use when CI/triage can't determine the real problem, an environment/credential gap blocks the fix, two fix attempts hit the same wall, or a mid-work gap (afterthought) is discovered. File the blocker as its own issue, link it (native blocked_by → sub-issue), stop, and hand back for mandatory human review. Pairs with manage-issue and ci-failure-triage.
 ---
 
 # Blocker Protocol
@@ -46,8 +46,8 @@ repeated), what a fix needs (env change, credential, decision).
    `method: add`, `issue_number` = blocked **issue** (PRs can't be parents),
    `sub_issue_id` = blocker's **database id**.
 
-3. **Emulation (human signal).** `⛔ Blocked by #N` comment on the blocked
-   issue, and `⛔ Blocked by #N — do not merge` in the blocked PR's checklist.
+These are the only two mechanisms. Do **not** add `⛔`-style "blocked by"
+comments or "do not merge" lines to issues or PR descriptions.
 
 ### Step 3 — Post a handoff document
 
@@ -70,8 +70,8 @@ implementing an issue you just filed.
 ## Afterthought sub-case
 
 A gap the originating issue missed, found mid-work, is **not** a blocker (the
-current work continues). File it, link it to the current issue, and add a
-`do not merge until #N resolved` line to the current PR checklist. Resolve
+current work continues). File it and link it to the current issue via the
+structural mechanisms above (native dependency and/or sub-issue). Resolve
 before the current PR merges — never silently fold it in or drop it.
 
 ## Anti-patterns
@@ -82,6 +82,7 @@ before the current PR merges — never silently fold it in or drop it.
 - Self-starting a freshly filed issue without human review.
 - Leaving PR activity subscribed so the same CI failure loops.
 - Folding an afterthought silently into the current PR.
+- Adding `⛔`/"do not merge" emulation text instead of the structural links.
 
 ## References
 

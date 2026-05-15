@@ -118,8 +118,9 @@ blocker **is an issue in itself**:
    - **Sub-issue (complementary):** `mcp__github__sub_issue_write`, `method: add`,
      `issue_number` = blocked **issue** (PRs can't be parents), `sub_issue_id` = blocker's
      **database id**.
-   - **Emulation (human-readable, not load-bearing):** `⛔ Blocked by #N` comment on the blocked
-     issue + `⛔ Blocked by #N — do not merge` line in the blocked PR's checklist.
+
+   These are the only two mechanisms. Do **not** add `⛔`-style "blocked by" comments or "do not
+   merge" lines to issues or PR descriptions — the structural links are the record.
 4. **Stop** — no speculative fixes; `unsubscribe_pr_activity` on the blocked PR so identical CI
    failures don't retrigger blind cycles.
 5. **Human review first** — a freshly filed issue requires human review *before* work starts.
@@ -130,9 +131,9 @@ capturing enough state — what was tried, exact commands/output, the wall, the 
 — for a fresh session to resume without re-deriving context.
 
 **Afterthought sub-case:** an important gap the originating issue missed, discovered mid-work, is
-*not* a blocker (current work continues) but must be filed, linked to the current issue, and
-resolved **before the current PR merges** (`do not merge until #N resolved` on the PR checklist)
-— tracked, never silently folded in or dropped.
+*not* a blocker (current work continues) but must be filed, linked to the current issue via the
+structural mechanisms above, and resolved **before the current PR merges** — tracked, never
+silently folded in or dropped.
 
 See `.claude/memory/blocker-protocol.md` and `.claude/skills/blocker-protocol/` for the full
 procedure. The CI-log-retrieval case is the specialization in `.claude/memory/ci-triage.md` /

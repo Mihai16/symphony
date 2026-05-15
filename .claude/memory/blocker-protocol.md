@@ -63,10 +63,9 @@ The blocker **is an issue in itself.** Create a dedicated GitHub issue (via
    blocker's **database id** (not its number). PRs cannot be sub-issue parents
    — the parent must be the blocked issue.
 
-3. **Emulation (human-readable signal — not load-bearing).** A
-   `⛔ Blocked by #N` comment on the blocked issue, **and** a
-   `⛔ Blocked by #N — do not merge` line in the blocked PR's
-   description/checklist. Convenience signal only; (1) is the real link.
+These are the only two linking mechanisms. Do **not** add `⛔`-style "blocked
+by" comments or "do not merge" lines to issues or PR descriptions — the
+structural links above are the record; ad-hoc text emulation is not used.
 
 ## Stop
 
@@ -89,9 +88,10 @@ mid-work. It is **not** a blocker — it does not stop the current issue/PR. But
 it must be:
 
 - **Filed** as its own issue (don't silently fold it into the current PR).
-- **Linked** to the current issue (sub-issue or `⛔`/relates-to comment).
-- **Resolved before the current PR merges** — tracked, not dropped. Add it to
-  the PR checklist as a `do not merge until #N resolved` item.
+- **Linked** to the current issue via the structural mechanisms above (native
+  dependency and/or sub-issue) — not via ad-hoc comment text.
+- **Resolved before the current PR merges** — tracked via the issue link, not
+  dropped.
 
 ## Handoff document
 
