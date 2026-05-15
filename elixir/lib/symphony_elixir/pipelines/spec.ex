@@ -15,20 +15,7 @@ defmodule SymphonyElixir.Pipelines.Spec do
   @default_codex_name "__default_codex"
   @codex_kind "codex"
 
-  @type t :: %__MODULE__{
-          name: String.t(),
-          kind: String.t(),
-          command: String.t(),
-          approval_policy: term(),
-          thread_sandbox: String.t() | nil,
-          turn_sandbox_policy: map() | nil,
-          turn_timeout_ms: pos_integer() | nil,
-          read_timeout_ms: pos_integer() | nil,
-          stall_timeout_ms: non_neg_integer() | nil,
-          stages: [String.t()],
-          max_internal_iterations: pos_integer() | nil,
-          review_threshold: float() | nil
-        }
+  @type t :: %__MODULE__{}
 
   defstruct [
     :name,
@@ -116,8 +103,7 @@ defmodule SymphonyElixir.Pipelines.Spec do
   end
 
   defp kind_defaults(@codex_kind) do
-    %Codex{}
-    |> Map.take([:approval_policy, :thread_sandbox, :turn_timeout_ms, :read_timeout_ms, :stall_timeout_ms])
+    Map.take(%Codex{}, [:approval_policy, :thread_sandbox, :turn_timeout_ms, :read_timeout_ms, :stall_timeout_ms])
   end
 
   defp kind_defaults(_kind) do

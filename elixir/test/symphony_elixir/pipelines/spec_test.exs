@@ -96,6 +96,19 @@ defmodule SymphonyElixir.Pipelines.SpecTest do
       assert {:error, {:pipeline_unresolved, :no_selection}} = Spec.resolve(settings)
     end
 
+    test "returns {:pipeline_unresolved, :missing} when no pipeline and no legacy codex block exist" do
+      settings = %Schema{codex: nil, pipeline: nil, pipelines: []}
+
+      assert {:error, {:pipeline_unresolved, :missing}} = Spec.resolve(settings)
+    end
+
+    test "ignores non-map pipeline definitions and surfaces the missing required fields" do
+      assert {:error, {:invalid_workflow_config, message}} =
+               Schema.parse(%{pipelines: %{"broken" => "not-a-map"}})
+
+      assert message =~ "kind"
+    end
+
     test "carries unsupported kind values through so validation can reject them" do
       assert {:ok, settings} =
                Schema.parse(%{
