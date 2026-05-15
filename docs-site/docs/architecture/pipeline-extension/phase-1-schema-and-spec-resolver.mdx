@@ -1,8 +1,14 @@
+---
+sidebar_position: 1
+title: Phase 1 — Pipeline Schema and Spec Resolver
+description: Add pipeline schema keys and the Pipelines.Spec resolver so a single choke point returns the runtime pipeline a worker should use.
+---
+
 # Phase 1 — Pipeline Schema and Spec Resolver
 
 > Tracking issue: [#19](https://github.com/Mihai16/symphony/issues/19)
-> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 1) and §3.1–3.3, §8.
-> Companion proposal: [`pipeline-extension.md`](../pipeline-extension.md).
+> Split from the [Pipeline Extension plan](https://github.com/Mihai16/symphony/blob/main/proposals/pipeline-extension-plan.md) §2 (Phase 1) and §3.1–3.3, §8.
+> Companion proposal: [pipeline-extension.md](https://github.com/Mihai16/symphony/blob/main/proposals/pipeline-extension.md).
 
 ## Summary
 
@@ -221,10 +227,8 @@ The proposal validations covered here (proposal §"Validation"):
 
 - "If `pipelines` is present, `pipeline.use` MUST be present" — when `pipeline.use` is missing,
   `resolve/1` returns `{:error, {:pipeline_unresolved, :no_selection}}`.
-- "`pipeline.use` MUST name a key in `pipelines`" — `{:error, {:pipeline_unresolved,
-  {:unknown, name}}}`.
-- "The selected pipeline's `kind` MUST be supported" — `{:error, {:unsupported_pipeline_kind,
-  kind}}`.
+- "`pipeline.use` MUST name a key in `pipelines`" — `{:error, {:pipeline_unresolved, {:unknown, name}}}`.
+- "The selected pipeline's `kind` MUST be supported" — `{:error, {:unsupported_pipeline_kind, kind}}`.
 - "The selected pipeline's `command` MUST be non-empty" — enforced by
   `validate_required([:command])` in `PipelineDefinition.changeset/2`.
 - "Kind-specific required fields MUST be present" — Phase 1 enforces only the kind-agnostic
@@ -290,13 +294,13 @@ Phases 2, 3, and 4 all depend on this PR landing first.
 
 ## Follow-ups (later phases)
 
-- [`./phase-2-runner-strategy-extraction.md`](./phase-2-runner-strategy-extraction.md) —
+- [`./phase-2-runner-strategy-extraction`](./phase-2-runner-strategy-extraction) —
   introduce the `Pipelines.Runner` behaviour, lift the Codex turn loop out of `AgentRunner` into
   `Pipelines.Codex`, dispatch on `Spec.kind`, and surface `pipeline` in the snapshot/presenter.
-- [`./phase-3-claude-pipeline-runner.md`](./phase-3-claude-pipeline-runner.md) — add
+- [`./phase-3-claude-pipeline-runner`](./phase-3-claude-pipeline-runner) — add
   `Pipelines.ClaudePipeline` as a configuration adapter over `Codex.AppServer`, applying
   `command`, `max_internal_iterations`, and stall overrides from the spec.
-- [`./phase-4-dynamic-reload-and-validation.md`](./phase-4-dynamic-reload-and-validation.md) —
+- [`./phase-4-dynamic-reload-and-validation`](./phase-4-dynamic-reload-and-validation) —
   wire `pipeline.use`/`pipelines.<name>` changes into the existing `WorkflowStore` reload path,
   harden per-kind validation, and add the dynamic-reload test cases from proposal §"Test and
   Validation Matrix Additions".

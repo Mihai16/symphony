@@ -23,6 +23,9 @@ needs it to **run** the system, it goes on the wiki.
 
 - A PR is introducing or modifying a developer-facing architecture / design / ADR document.
 - A new subsystem is shipping and deserves a docs page.
+- A non-trivial feature is starting — write its feature doc here *before* filing the issue or
+  starting code. This is the doc-driven default; see "Feature docs" below and the
+  "Feature Doc-Driven Development" section in `.claude/memory/workflow.md`.
 - An existing page is stale relative to code or spec.
 - The user asks "where do these docs live" / "write the architecture for X" / "document Y for
   contributors".
@@ -31,8 +34,32 @@ Do **not** invoke for:
 
 - `SPEC.md` edits (the spec edits itself, in place at repo root).
 - Operator how-tos (use `manage-wiki` instead).
-- In-flight design exploration (write a `proposals/<slug>.md` first; the architecture page lands
-  when the proposal is accepted).
+- The original *proposal* — that still lives in `proposals/<slug>.md`. The per-feature/per-phase
+  *implementation docs* split out from an accepted proposal live here, not in `proposals/`.
+
+## Feature docs
+
+For any non-trivial feature, the feature doc on this site is the source of truth for scope,
+acceptance criteria, dependencies, and risks. Issues and PRs link to it; they do not duplicate
+it. Multi-phase features get one MDX file per phase, all under
+`docs-site/docs/architecture/<feature>/<phase-slug>.mdx`, with a parent overview page at
+`docs-site/docs/architecture/<feature>.mdx` that lists the phases.
+
+Required structure of a feature/phase doc (in addition to standard front matter):
+
+1. H1 matching `title`.
+2. Header blockquote: `> Tracking issue: [#N](...)` + plan/proposal / prior-phase backlinks.
+3. Sections in this order: `Summary`, `Goals`, `Non-Goals`, `Files Touched`,
+   `Detailed Change Set`, `Acceptance Criteria` (checkbox list), `Test Plan` (checkbox list),
+   `Dependencies`, `Risks`, `Follow-ups` (optional).
+
+Open the tracking issue *after* the doc exists, with `Tracking doc: <docs-site URL>` at the
+bottom of the issue body. Cross-link the issue number back into the doc's header. The chain of
+dependencies between phases (e.g. Phase 2 depends on #19) is recorded in both directions so a
+reader landing on either side sees the whole picture.
+
+When the feature lands, keep the doc — it stops being "planned" and becomes the durable
+architectural record. Update it in the same PR that lands the code, never let it drift.
 
 ## Procedure
 

@@ -1,8 +1,14 @@
+---
+sidebar_position: 3
+title: Phase 3 — claude-pipeline Runner
+description: Add the Pipelines.ClaudePipeline runner as a configuration adapter over Codex.AppServer for kind&#58; claude-pipeline workflows.
+---
+
 # Phase 3 — `claude-pipeline` Runner
 
 > Tracking issue: [#21](https://github.com/Mihai16/symphony/issues/21)
-> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 3) and §3.4 (ClaudePipeline bullets), §5, §6.
-> Depends on [Phase 2](./phase-2-runner-strategy-extraction.md) ([#20](https://github.com/Mihai16/symphony/issues/20)).
+> Split from the [Pipeline Extension plan](https://github.com/Mihai16/symphony/blob/main/proposals/pipeline-extension-plan.md) §2 (Phase 3) and §3.4 (ClaudePipeline bullets), §5, §6.
+> Depends on [Phase 2](./phase-2-runner-strategy-extraction) ([#20](https://github.com/Mihai16/symphony/issues/20)).
 
 ## Summary
 
@@ -14,7 +20,7 @@ the new runner instead of the legacy Codex path.
 The crucial design point: **this runner is a configuration adapter, not a new
 protocol**. The launched subprocess MUST speak the Codex app-server JSON-RPC
 protocol on stdio. The proposal mandates this in the
-[Agent Runner Contract Changes](../pipeline-extension.md) section
+[Agent Runner Contract Changes](https://github.com/Mihai16/symphony/blob/main/proposals/pipeline-extension.md) section
 ("the launched subprocess MUST speak the Codex app-server protocol on stdio,
 so the existing Agent Runner machinery (event forwarding, session ID extraction,
 stall detection, timeouts) works without modification"). All `ClaudePipeline`

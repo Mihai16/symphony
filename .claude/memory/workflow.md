@@ -126,6 +126,73 @@ changes contributor-facing architecture or design, it includes a `docs-site/` pa
 refactors with no architectural shift do not need either. See `.claude/skills/manage-docs/` and
 `.claude/skills/manage-wiki/`.
 
+## Feature Doc-Driven Development
+
+Symphony works doc-first for non-trivial features. The feature doc is the *source of truth* for
+scope, acceptance criteria, dependencies, and risks — written before the code, updated as it
+lands, kept after it ships. Issues and PRs are pointers to the doc; they do not duplicate it.
+
+**When this applies:** any feature larger than a single-PR change. Multi-phase implementations
+split out from a proposal, new subsystems, anything where "what is in scope?" deserves more than
+the issue body. Typo fixes, small bug fixes, and one-shot refactors do not need a feature doc.
+
+**Where the doc lives:** `docs-site/docs/architecture/<feature>/<slug>.mdx`. One file per
+feature (or per phase, when a feature is multi-phase). Sibling phases share a parent directory and
+appear as a nested category under the parent architecture page in `sidebars.js`. The parent page
+gets an "Implementation Phases" table linking to each child with its tracking issue.
+
+**Required front matter:**
+
+```yaml
+---
+sidebar_position: <N>
+title: <Phase N — short title, or feature name>
+description: <one sentence, ≤ 160 chars>
+---
+```
+
+**Required header block** (immediately after the H1):
+
+```markdown
+> Tracking issue: [#<n>](https://github.com/Mihai16/symphony/issues/<n>)
+> Split from the [<plan>](https://github.com/Mihai16/symphony/blob/main/proposals/<plan>.md) ...
+> Depends on [<prior phase>](./<prior-phase>) ([#<m>](https://github.com/Mihai16/symphony/issues/<m>)).
+```
+
+**Required sections** (in this order, headings as shown):
+
+- `## Summary` — 2-3 sentences.
+- `## Goals` / `## Non-Goals` — explicit in/out scope.
+- `## Files Touched` — bullets with exact paths and line refs where applicable.
+- `## Detailed Change Set` — H3 per area of the codebase.
+- `## Acceptance Criteria` — checkbox list, sourced from plan/proposal where one exists.
+- `## Test Plan` — checkbox list.
+- `## Dependencies` — explicit prior-phase / prior-issue links.
+- `## Risks` — what could break, with mitigations.
+- `## Follow-ups` — sibling phases or downstream work (optional).
+
+**Order of operations when starting a new feature:**
+
+1. Write the feature doc(s) as MDX under `docs-site/docs/architecture/<feature>/`.
+2. Add the doc(s) to `docs-site/sidebars.js`.
+3. File the tracking issue with a `Tracking doc:` link at the bottom pointing at the doc.
+4. Cross-link the issue number into the doc's header block.
+5. Start the branch (`issue-<n>-<slug>`) and the implementation. Update the doc as scope clarifies.
+
+The proposals under `proposals/` remain *strategy docs* (the master plan that spawned the feature
+docs) and *historical record* of accepted proposals. They are NOT where per-feature scope/AC live
+now that the docs site is the source of truth. Do not duplicate phase content between
+`proposals/` and `docs-site/`.
+
+**MDX gotchas** (the build will fail otherwise):
+
+- Bare angle brackets (`<name>`, `<kind>`) outside code spans are parsed as JSX. Wrap in backticks
+  or use `&lt;` / `&gt;`.
+- Inside Mermaid blocks, always use `&lt;` / `&gt;` (see issue #12).
+- Curly braces outside code blocks become JSX expressions.
+
+See `.claude/skills/manage-docs/` for the operational procedure for editing the docs site.
+
 ## Post-Push CI Check
 
 After pushing a branch or merging a PR, **check the resulting workflow runs before reporting
