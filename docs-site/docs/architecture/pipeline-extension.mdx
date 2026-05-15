@@ -15,7 +15,23 @@ buildable code in `elixir/`.
 - *What* and *why* → the proposal.
 - *Change list* → the plan.
 - *Shape, seams, rationale* → **this page**.
+- *Per-phase scope, acceptance criteria, dependencies* → the four phase pages below.
 :::
+
+## Implementation Phases
+
+The plan ships in four independently-reviewable phases. Each has its own page on this site
+with detailed change set, acceptance criteria, and a tracking issue:
+
+| Phase | Scope | Tracking issue |
+|-------|-------|----------------|
+| [Phase 1 — Schema + Spec Resolver](./pipeline-extension/phase-1-schema-and-spec-resolver) | Add `pipeline` / `pipelines` to `Config.Schema`; introduce `Pipelines.Spec.resolve/1` choke point; preserve legacy `codex` behaviour via `__default_codex` shim. | [#19](https://github.com/Mihai16/symphony/issues/19) |
+| [Phase 2 — Runner Strategy Extraction](./pipeline-extension/phase-2-runner-strategy-extraction) | Introduce `Pipelines.Runner` behaviour; lift Codex turn loop into `Pipelines.Codex`; dispatch on `Spec.kind`; surface `pipeline` / `pipeline_kind` in snapshot. | [#20](https://github.com/Mihai16/symphony/issues/20) |
+| [Phase 3 — `claude-pipeline` Runner](./pipeline-extension/phase-3-claude-pipeline-runner) | Add `Pipelines.ClaudePipeline` as a configuration adapter over `Codex.AppServer` (NOT a new protocol). | [#21](https://github.com/Mihai16/symphony/issues/21) |
+| [Phase 4 — Dynamic Reload + SPEC Edits](./pipeline-extension/phase-4-dynamic-reload-and-validation) | Wire `pipeline.use` changes into `WorkflowStore` reload; harden validation; land SPEC.md edits. | [#22](https://github.com/Mihai16/symphony/issues/22) |
+
+Dependency chain: Phase 1 → 2 → 3 → 4. Phases 1 and 2 are mandatory for shipping multi-pipeline
+support; Phases 3 and 4 can land independently after that.
 
 ## 1. Problem Frame
 

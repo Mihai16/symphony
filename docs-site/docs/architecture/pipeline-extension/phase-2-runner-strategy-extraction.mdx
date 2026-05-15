@@ -1,8 +1,14 @@
+---
+sidebar_position: 2
+title: Phase 2 — Runner Strategy Extraction
+description: Introduce the Pipelines.Runner behaviour, extract the Codex turn loop into Pipelines.Codex, and turn AgentRunner into a thin dispatcher.
+---
+
 # Phase 2 — Runner Strategy Extraction
 
 > Tracking issue: [#20](https://github.com/Mihai16/symphony/issues/20)
-> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 2) and §3.4–3.7, §3.9.
-> Depends on [Phase 1](./phase-1-schema-and-spec-resolver.md) ([#19](https://github.com/Mihai16/symphony/issues/19)).
+> Split from the [Pipeline Extension plan](https://github.com/Mihai16/symphony/blob/main/proposals/pipeline-extension-plan.md) §2 (Phase 2) and §3.4–3.7, §3.9.
+> Depends on [Phase 1](./phase-1-schema-and-spec-resolver) ([#19](https://github.com/Mihai16/symphony/issues/19)).
 
 ## Summary
 
@@ -151,9 +157,7 @@ end
 Opt semantics (every implementation MUST honour these; the dispatcher always
 supplies all four):
 
-- `:codex_update_recipient` — pid that receives `{:codex_worker_update,
-  issue_id, update}` and `{:worker_runtime_info, ...}` messages. May be `nil`
-  in tests; runners MUST treat `nil` as a no-op.
+- `:codex_update_recipient` — pid that receives `{:codex_worker_update, issue_id, update}` and `{:worker_runtime_info, ...}` messages. May be `nil` in tests; runners MUST treat `nil` as a no-op.
 - `:worker_host` — already-selected SSH host (or `nil` for local). Runners do
   not re-select; the orchestrator pins host for the lifetime of the run.
 - `:max_turns` — outer cap on issue-state-driven turn iterations. Pulled from
@@ -252,9 +256,9 @@ defp pipeline_runner(%Spec{kind: kind}),
 dispatch, so the raise is defence in depth.
 
 `send_pipeline_runtime_info/3` mirrors the existing `send_worker_runtime_info/4`
-(lines 63–77) and emits `{:pipeline_runtime_info, issue_id, %{pipeline: name,
-kind: kind}}` so the Orchestrator can populate the running-entry record before
-the first Codex message arrives.
+(lines 63–77) and emits `{:pipeline_runtime_info, issue_id, %{pipeline: name, kind: kind}}`
+so the Orchestrator can populate the running-entry record before the first Codex message
+arrives.
 
 ### Orchestrator: pipeline-aware running entry
 

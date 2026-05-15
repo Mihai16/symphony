@@ -1,8 +1,14 @@
+---
+sidebar_position: 4
+title: Phase 4 — Dynamic Reload and Validation
+description: Wire pipeline.use changes into the WORKFLOW.md reload loop, harden preflight validation, and land the coupled SPEC.md edits.
+---
+
 # Phase 4 — Dynamic Reload, Validation Hardening, and SPEC Edits
 
 > Tracking issue: [#22](https://github.com/Mihai16/symphony/issues/22)
-> Split from the [Pipeline Extension plan](../pipeline-extension-plan.md) §2 (Phase 4) and §3.8, §3.9, §4.
-> Depends on [Phase 3](./phase-3-claude-pipeline-runner.md) ([#21](https://github.com/Mihai16/symphony/issues/21)) and transitively on Phases 1–2 ([#19](https://github.com/Mihai16/symphony/issues/19), [#20](https://github.com/Mihai16/symphony/issues/20)).
+> Split from the [Pipeline Extension plan](https://github.com/Mihai16/symphony/blob/main/proposals/pipeline-extension-plan.md) §2 (Phase 4) and §3.8, §3.9, §4.
+> Depends on [Phase 3](./phase-3-claude-pipeline-runner) ([#21](https://github.com/Mihai16/symphony/issues/21)) and transitively on Phases 1–2 ([#19](https://github.com/Mihai16/symphony/issues/19), [#20](https://github.com/Mihai16/symphony/issues/20)).
 
 ## Summary
 
@@ -255,7 +261,7 @@ Plus, by construction:
 
 ## Dependencies
 
-- Phase 3 (`./phase-3-claude-pipeline-runner.md`) — the `claude-pipeline`
+- Phase 3 ([`./phase-3-claude-pipeline-runner`](./phase-3-claude-pipeline-runner)) — the `claude-pipeline`
   runner must exist for the matrix's "swap from codex to claude-pipeline"
   cases to be meaningful end-to-end.
 - Transitively, Phases 1 and 2 — the schema, resolver, and dispatch
