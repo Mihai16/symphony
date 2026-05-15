@@ -543,6 +543,7 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    scheduled_before_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :normal})
     Process.sleep(50)
     state = :sys.get_state(pid)
@@ -551,7 +552,15 @@ defmodule SymphonyElixir.CoreTest do
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 500, 1_100)
+
+    # due_at_ms is set to (scheduling monotonic time + continuation delay), and
+    # scheduling happens after scheduled_before_ms, so this offset is always
+    # >= the configured 1_000ms delay regardless of runner load. Asserting the
+    # scheduled offset (not recomputed real-time remaining) keeps this
+    # deterministic; the upper bound is a loose sanity check on the constant.
+    scheduled_offset_ms = due_at_ms - scheduled_before_ms
+    assert scheduled_offset_ms >= 1_000
+    assert scheduled_offset_ms <= 5_000
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
