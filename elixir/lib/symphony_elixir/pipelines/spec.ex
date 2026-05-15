@@ -67,18 +67,18 @@ defmodule SymphonyElixir.Pipelines.Spec do
   end
 
   defp from_definition(%PipelineDefinition{} = definition, _settings) do
-    defaults = kind_defaults(definition.kind)
+    codex_defaults = %Codex{}
 
     %__MODULE__{
       name: definition.name,
       kind: definition.kind,
       command: definition.command,
-      approval_policy: definition.approval_policy || defaults.approval_policy,
-      thread_sandbox: definition.thread_sandbox || defaults.thread_sandbox,
+      approval_policy: definition.approval_policy || codex_defaults.approval_policy,
+      thread_sandbox: definition.thread_sandbox || codex_defaults.thread_sandbox,
       turn_sandbox_policy: definition.turn_sandbox_policy,
-      turn_timeout_ms: definition.turn_timeout_ms || defaults.turn_timeout_ms,
-      read_timeout_ms: definition.read_timeout_ms || defaults.read_timeout_ms,
-      stall_timeout_ms: definition.stall_timeout_ms || defaults.stall_timeout_ms,
+      turn_timeout_ms: definition.turn_timeout_ms || codex_defaults.turn_timeout_ms,
+      read_timeout_ms: definition.read_timeout_ms || codex_defaults.read_timeout_ms,
+      stall_timeout_ms: definition.stall_timeout_ms || codex_defaults.stall_timeout_ms,
       stages: definition.stages || [],
       max_internal_iterations: definition.max_internal_iterations,
       review_threshold: definition.review_threshold
@@ -102,17 +102,4 @@ defmodule SymphonyElixir.Pipelines.Spec do
     }
   end
 
-  defp kind_defaults(@codex_kind) do
-    Map.take(%Codex{}, [:approval_policy, :thread_sandbox, :turn_timeout_ms, :read_timeout_ms, :stall_timeout_ms])
-  end
-
-  defp kind_defaults(_kind) do
-    %{
-      approval_policy: nil,
-      thread_sandbox: nil,
-      turn_timeout_ms: nil,
-      read_timeout_ms: nil,
-      stall_timeout_ms: nil
-    }
-  end
 end
