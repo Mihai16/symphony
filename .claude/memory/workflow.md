@@ -64,6 +64,14 @@ See `.claude/skills/start-issue-branch/` for the full procedure.
   resolves multiple issues, list each: `Closes #N, Closes #M`. The only time this is skipped is
   when no issue exists (e.g. the trivial-change carve-out above, or a hotfix being filed as its
   own issue). In every other case: tie the PR to its issue with a closing keyword.
+- **⚠️ Auto-close is repo-wide, not keyword-gated.** This repo's GitHub configuration closes
+  **every** issue referenced as `#N` anywhere in a merged PR body (and in commit messages that
+  land on `main`) — a `Closes`/`Fixes`/`Resolves` keyword is *not* required to trigger the close.
+  Consequence: a PR body must mention **only** the issue numbers it actually intends to close.
+  Never write a bare `#N` for a context/related/parent issue. In particular, the standing
+  always-open umbrella (currently issue 32) and other tracking issues must be referred to
+  *without* the `#` linkifier (write "umbrella issue 32", "issue 30") so the merge does not
+  force-close them. This applies to commit messages too. See `.claude/skills/create-pr/`.
 - PR title: same as the issue title, or a closely related rewording. Keep under 70 chars.
 - PR body must follow `.github/pull_request_template.md` — five `####` sections (Context, TL;DR,
   Summary, Alternatives, Test Plan), in that order, no `<!--` leftovers, bullets in Summary,
