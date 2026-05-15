@@ -635,7 +635,13 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp flatten_errors(errors, prefix) when is_list(errors) do
-    Enum.map(errors, &(prefix <> " " <> &1))
+    if Enum.all?(errors, &is_binary/1) do
+      Enum.map(errors, &(prefix <> " " <> &1))
+    else
+      errors
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {entry, index} -> flatten_errors(entry, "#{prefix}.#{index}") end)
+    end
   end
 
   defp translate_error({message, options}) do
