@@ -89,8 +89,11 @@ See `.claude/skills/start-issue-branch/` for the full procedure.
   (`subscribe_pr_activity`) so review comments and CI results arrive as events (no polling), then
   investigate and handle incoming review comments / CI failures — pushing fixes — until the work
   is accepted or the user says to stop (`unsubscribe_pr_activity`). A genuine blocker is a valid
-  stop condition: file + link it, then unsubscribe (see Blockers above). The full terminal
-  sequence for "fix/handle issue #N" is:
+  stop condition: file + link it, then unsubscribe (see Blockers above). **Exception — fix too
+  large:** if a CI failure (or review ask) needs more than a small in-loop fix, do not attempt the
+  large change on this PR; open a separate follow-up issue to carry it (linked per the Blockers
+  protocol) and keep the current PR scoped. The full terminal sequence for "fix/handle issue #N"
+  is:
 
   > implement → commit → push → open PR → subscribe to PR activity → handle review/CI until
   > accepted (or told to stop).
