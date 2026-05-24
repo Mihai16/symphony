@@ -80,6 +80,27 @@ See `.claude/skills/start-issue-branch/` for the full procedure.
   excess; don't expand the PR.
 - PRs are created only when the user explicitly asks. Do not open PRs proactively unless the
   user's request implies it ("ship it", "open a PR", etc.).
+- **"Fix/handle issue #N" is itself such an implying request.** When a session is handed a GitHub
+  issue to "fix" or "handle" ("fix issue #N", "handle #N"), the terminal deliverable is an
+  *opened pull request* for that issue's branch — not just commit + push. A pushed branch with no
+  PR leaves the work invisible and unreviewable; the PR is the natural completion of "handle this
+  issue".
+- **The handoff does not end at PR creation.** After the PR is open, *subscribe to its activity*
+  (`subscribe_pr_activity`) so review comments and CI results arrive as events (no polling), then
+  investigate and handle incoming review comments / CI failures — pushing fixes — until the work
+  is accepted or the user says to stop (`unsubscribe_pr_activity`). A genuine blocker is a valid
+  stop condition: file + link it, then unsubscribe (see Blockers above). **Exception — fix too
+  large:** if a CI failure (or review ask) needs more than a small in-loop fix, do not attempt the
+  large change on this PR; open a separate follow-up issue to carry it (linked per the Blockers
+  protocol) and keep the current PR scoped. The full terminal sequence for "fix/handle issue #N"
+  is:
+
+  > implement → commit → push → open PR → subscribe to PR activity → handle review/CI until
+  > accepted (or told to stop).
+
+  Every step is still gated by explicit user instructions to the contrary ("just push, no PR";
+  "don't watch it") — stop at the instructed step (see "When These Conventions Conflict With User
+  Instructions" below).
 
 See `.claude/skills/create-pr/` for the full procedure (template rules, lint checks, body
 skeleton).
