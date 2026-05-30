@@ -180,6 +180,24 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  def handle_info({:pipeline_runtime_info, issue_id, runtime_info}, %{running: running} = state)
+      when is_binary(issue_id) and is_map(runtime_info) do
+    case Map.get(running, issue_id) do
+      nil ->
+        {:noreply, state}
+
+      running_entry ->
+        updated_running_entry =
+          running_entry
+          |> maybe_put_runtime_value(:pipeline, runtime_info[:pipeline])
+          |> maybe_put_runtime_value(:pipeline_kind, runtime_info[:pipeline_kind])
+          |> maybe_put_runtime_value(:stall_timeout_ms_snapshot, runtime_info[:stall_timeout_ms])
+
+        notify_dashboard()
+        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+    end
+  end
+
   def handle_info(
         {:codex_worker_update, issue_id, %{event: _, timestamp: _} = update},
         %{running: running} = state
@@ -446,28 +464,31 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp reconcile_stalled_running_issues(%State{} = state) do
-    timeout_ms = Config.settings!().codex.stall_timeout_ms
+    fallback_timeout_ms = Config.settings!().codex.stall_timeout_ms
 
-    cond do
-      timeout_ms <= 0 ->
-        state
+    if map_size(state.running) == 0 do
+      state
+    else
+      now = DateTime.utc_now()
 
-      map_size(state.running) == 0 ->
-        state
+      Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
+        timeout_ms = stall_timeout_for_entry(running_entry, fallback_timeout_ms)
+        restart_stalled_issue(state_acc, issue_id, running_entry, now, timeout_ms)
+      end)
+    end
+  end
 
-      true ->
-        now = DateTime.utc_now()
-
-        Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
-          restart_stalled_issue(state_acc, issue_id, running_entry, now, timeout_ms)
-        end)
+  defp stall_timeout_for_entry(running_entry, fallback_ms) do
+    case Map.get(running_entry, :stall_timeout_ms_snapshot) do
+      ms when is_integer(ms) -> ms
+      _ -> fallback_ms
     end
   end
 
   defp restart_stalled_issue(state, issue_id, running_entry, now, timeout_ms) do
     elapsed_ms = stall_elapsed_ms(running_entry, now)
 
-    if is_integer(elapsed_ms) and elapsed_ms > timeout_ms do
+    if is_integer(timeout_ms) and timeout_ms > 0 and is_integer(elapsed_ms) and elapsed_ms > timeout_ms do
       identifier = Map.get(running_entry, :identifier, issue_id)
       session_id = running_entry_session_id(running_entry)
 
@@ -707,6 +728,9 @@ defmodule SymphonyElixir.Orchestrator do
             issue: issue,
             worker_host: worker_host,
             workspace_path: nil,
+            pipeline: nil,
+            pipeline_kind: nil,
+            stall_timeout_ms_snapshot: nil,
             session_id: nil,
             last_codex_message: nil,
             last_codex_timestamp: nil,
@@ -1112,6 +1136,8 @@ defmodule SymphonyElixir.Orchestrator do
           state: metadata.issue.state,
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
+          pipeline: Map.get(metadata, :pipeline),
+          pipeline_kind: Map.get(metadata, :pipeline_kind),
           session_id: metadata.session_id,
           codex_app_server_pid: metadata.codex_app_server_pid,
           codex_input_tokens: metadata.codex_input_tokens,
@@ -1339,8 +1365,7 @@ defmodule SymphonyElixir.Orchestrator do
     output_tokens = Map.get(codex_totals, :output_tokens, 0) + token_delta.output_tokens
     total_tokens = Map.get(codex_totals, :total_tokens, 0) + token_delta.total_tokens
 
-    seconds_running =
-      Map.get(codex_totals, :seconds_running, 0) + Map.get(token_delta, :seconds_running, 0)
+    seconds_running = Map.get(codex_totals, :seconds_running, 0) + Map.get(token_delta, :seconds_running, 0)
 
     %{
       input_tokens: max(0, input_tokens),

@@ -102,6 +102,8 @@ defmodule SymphonyElixirWeb.Presenter do
       state: entry.state,
       worker_host: Map.get(entry, :worker_host),
       workspace_path: Map.get(entry, :workspace_path),
+      pipeline: Map.get(entry, :pipeline),
+      pipeline_kind: Map.get(entry, :pipeline_kind),
       session_id: entry.session_id,
       turn_count: Map.get(entry, :turn_count, 0),
       last_event: entry.last_codex_event,
@@ -132,6 +134,8 @@ defmodule SymphonyElixirWeb.Presenter do
     %{
       worker_host: Map.get(running, :worker_host),
       workspace_path: Map.get(running, :workspace_path),
+      pipeline: Map.get(running, :pipeline),
+      pipeline_kind: Map.get(running, :pipeline_kind),
       session_id: running.session_id,
       turn_count: Map.get(running, :turn_count, 0),
       state: running.state,
